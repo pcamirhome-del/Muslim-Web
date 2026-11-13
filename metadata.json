@@ -1,0 +1,6 @@
+{
+  "name": "نور الإسلام - المواقيت والقرآن والأذان",
+  "description": "تطبيق إسلامي شامل (PWA) لمواقيت الصلاة الدقيقة، الأذان التلقائي، منبه الأذكار بالصوت البشري، بوصلة القبلة الحقيقية، البث المباشر لإذاعة القرآن، والمصحف التفاعلي.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
