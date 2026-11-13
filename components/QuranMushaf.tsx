@@ -108,8 +108,11 @@ export function QuranMushaf() {
   const pointerStartRef = useRef<{ x: number; y: number; active: boolean } | null>(null);
   const activePointersRef = useRef<Set<number>>(new Set());
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
-  const activeAyahElemRef = useRef<HTMLButtonElement | null>(null);
+  const activeAyahElemRef = useRef<HTMLSpanElement | null>(null);
   const lastSyncedSurahRef = useRef<number>(1);
+  const pageCacheRef = useRef<Map<number, AyahData[]>>(new Map());
+  const pendingScrollYRef = useRef<number | null>(null);
+  const lastScrolledRecitedKeyRef = useRef<string | null>(null);
 
   const player = useGaplessQuranPlayer();
 
@@ -146,81 +149,125 @@ export function QuranMushaf() {
   useEffect(() => {
     let cancelled = false;
 
-    const loadCurrentAndAdjacent = async () => {
-      setLoadingPage(true);
+    const applyLoadedPage = (curAyahs: AyahData[]) => {
+      pageCacheRef.current.set(currentPage, curAyahs);
+      setAyahs(curAyahs);
+      setLoadingPage(false);
       setErrorMsg(null);
-      try {
-        const curAyahs = await fetchPageWithOfflineFallback(currentPage);
-        if (cancelled) return;
-        setAyahs(curAyahs);
 
-        if (curAyahs[0]?.surah?.number) {
-          const sNum = curAyahs[0].surah.number;
-          setSelectedSurah(sNum);
-          const meta = surahs.find((s) => s.number === sNum);
-          if (meta && lastSyncedSurahRef.current !== sNum) {
-            lastSyncedSurahRef.current = sNum;
-            setFromAyah(1);
-            setToAyah(meta.numberOfAyahs);
-          }
+      if (curAyahs[0]?.surah?.number) {
+        const sNum = curAyahs[0].surah.number;
+        setSelectedSurah(sNum);
+        const meta = surahs.find((s) => s.number === sNum);
+        if (meta && lastSyncedSurahRef.current !== sNum) {
+          lastSyncedSurahRef.current = sNum;
+          setFromAyah(1);
+          setToAyah(meta.numberOfAyahs);
         }
+      }
 
-        // Prefetch adjacent pages silently in background for 3D page reveal
-        if (currentPage < 604) {
+      if (pendingScrollYRef.current !== null && typeof window !== 'undefined') {
+        const targetY = pendingScrollYRef.current;
+        pendingScrollYRef.current = null;
+        requestAnimationFrame(() => {
+          if (Math.abs(window.scrollY - targetY) > 4) {
+            window.scrollTo({ top: targetY, behavior: 'auto' });
+          }
+        });
+      }
+    };
+
+    const prefetchAdjacent = () => {
+      if (currentPage < 604) {
+        const cachedNext = pageCacheRef.current.get(currentPage + 1);
+        if (cachedNext) {
+          setNextPageAyahs(cachedNext);
+        } else {
           fetchPageWithOfflineFallback(currentPage + 1)
             .then((data) => {
+              pageCacheRef.current.set(currentPage + 1, data);
               if (!cancelled) setNextPageAyahs(data);
             })
             .catch(() => {
               if (!cancelled) setNextPageAyahs([]);
             });
-        } else {
-          setNextPageAyahs([]);
         }
+      } else {
+        setNextPageAyahs([]);
+      }
 
-        if (currentPage > 1) {
+      if (currentPage > 1) {
+        const cachedPrev = pageCacheRef.current.get(currentPage - 1);
+        if (cachedPrev) {
+          setPrevPageAyahs(cachedPrev);
+        } else {
           fetchPageWithOfflineFallback(currentPage - 1)
             .then((data) => {
+              pageCacheRef.current.set(currentPage - 1, data);
               if (!cancelled) setPrevPageAyahs(data);
             })
             .catch(() => {
               if (!cancelled) setPrevPageAyahs([]);
             });
-        } else {
-          setPrevPageAyahs([]);
         }
-      } catch {
-        if (!cancelled) {
-          setErrorMsg('تعذر تحميل صفحة المصحف. تأكد من الاتصال بالإنترنت أو حمّل السورة أوفلاين.');
-        }
-      } finally {
-        if (!cancelled) setLoadingPage(false);
+      } else {
+        setPrevPageAyahs([]);
       }
     };
 
-    const t = setTimeout(loadCurrentAndAdjacent, 0);
+    const loadCurrentAndAdjacent = async () => {
+      const cachedCurrent = pageCacheRef.current.get(currentPage);
+      if (cachedCurrent) {
+        applyLoadedPage(cachedCurrent);
+        prefetchAdjacent();
+        return;
+      }
+
+      setLoadingPage(true);
+      setErrorMsg(null);
+      try {
+        const curAyahs = await fetchPageWithOfflineFallback(currentPage);
+        if (cancelled) return;
+        applyLoadedPage(curAyahs);
+        prefetchAdjacent();
+      } catch {
+        if (!cancelled) {
+          setErrorMsg('تعذر تحميل صفحة المصحف. تأكد من الاتصال بالإنترنت أو حمّل السورة أوفلاين.');
+          setLoadingPage(false);
+        }
+      }
+    };
+
+    loadCurrentAndAdjacent();
     return () => {
       cancelled = true;
-      clearTimeout(t);
     };
   }, [currentPage, surahs]);
 
-  // Auto smooth-scroll & auto-turn Mushaf page when recited Ayah updates
+  // Auto smooth-scroll & auto-turn Mushaf page ONLY when the active recited Ayah changes
   useEffect(() => {
-    if (!player.activeTarget || player.activeTarget.mode !== 'ayah') return;
+    if (!player.activeTarget || player.activeTarget.mode !== 'ayah') {
+      lastScrolledRecitedKeyRef.current = null;
+      return;
+    }
     const targetSurah = player.activeTarget.surahNumber;
     const targetAyah = player.activeTarget.ayahInSurah;
+    const key = `${targetSurah}:${targetAyah}`;
 
     const matchInCurrentPage = ayahs.find(
       (a) => a.surah.number === targetSurah && a.numberInSurah === targetAyah
     );
 
     if (matchInCurrentPage && activeAyahElemRef.current) {
-      activeAyahElemRef.current.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
-    } else if (!loadingPage && ayahs.length > 0) {
+      if (lastScrolledRecitedKeyRef.current !== key) {
+        lastScrolledRecitedKeyRef.current = key;
+        activeAyahElemRef.current.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
+      }
+    } else if (!loadingPage && ayahs.length > 0 && lastScrolledRecitedKeyRef.current !== key) {
+      lastScrolledRecitedKeyRef.current = key;
       // Find which page has that Ayah and flip to it
       fetch(`https://api.alquran.cloud/v1/ayah/${targetSurah}:${targetAyah}/quran-uthmani`)
         .then((r) => r.json())
@@ -266,6 +313,19 @@ export function QuranMushaf() {
     }
   };
 
+  // Commit page flip while preserving exact vertical scroll position
+  const commitPageFlip = useCallback((targetPage: number) => {
+    if (typeof window !== 'undefined') {
+      pendingScrollYRef.current = window.scrollY;
+    }
+    const cached = pageCacheRef.current.get(targetPage);
+    if (cached) {
+      setAyahs(cached);
+      setLoadingPage(false);
+    }
+    setCurrentPage(targetPage);
+  }, []);
+
   // Animated 3D Page Turn helper
   const triggerAnimatedFlip = useCallback(
     (dir: 'next' | 'prev') => {
@@ -273,18 +333,21 @@ export function QuranMushaf() {
       if (dir === 'next' && currentPage >= 604) return;
       if (dir === 'prev' && currentPage <= 1) return;
 
+      const targetPage =
+        dir === 'next' ? Math.min(604, currentPage + 1) : Math.max(1, currentPage - 1);
+
       setFlipDirection(dir);
       setIsAnimatingFlip(true);
       setFlipProgress(1);
 
       setTimeout(() => {
-        setCurrentPage((p) => (dir === 'next' ? Math.min(604, p + 1) : Math.max(1, p - 1)));
+        commitPageFlip(targetPage);
         setFlipDirection(null);
         setFlipProgress(0);
         setIsAnimatingFlip(false);
       }, 310);
     },
-    [currentPage, isAnimatingFlip]
+    [commitPageFlip, currentPage, isAnimatingFlip]
   );
 
   // Touch / Pointer Realistic 3D Page Drag Handlers (multi-touch safe for user pinch-zoom)
@@ -335,10 +398,12 @@ export function QuranMushaf() {
 
     if (flipProgress >= 0.25) {
       const dir = flipDirection;
+      const targetPage =
+        dir === 'next' ? Math.min(604, currentPage + 1) : Math.max(1, currentPage - 1);
       setIsAnimatingFlip(true);
       setFlipProgress(1);
       setTimeout(() => {
-        setCurrentPage((p) => (dir === 'next' ? Math.min(604, p + 1) : Math.max(1, p - 1)));
+        commitPageFlip(targetPage);
         setFlipDirection(null);
         setFlipProgress(0);
         setIsAnimatingFlip(false);
@@ -672,37 +737,43 @@ export function QuranMushaf() {
         )}
       </div>
 
-      {/* Realistic 3D Page-Flipping Mushaf Stage (Compact readable mobile frame + manual pinch-zoom allowed) */}
+      {/* Realistic 3D Page-Flipping Mushaf Stage (Authentic connected Mushaf page + manual pinch-zoom + steady scroll) */}
       <div
         ref={pageContainerRef}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={(e) => finishDrag(e)}
         onPointerCancel={(e) => finishDrag(e)}
-        style={{ perspective: '1800px', touchAction: 'pan-y pinch-zoom' }}
+        style={{ perspective: '1800px', touchAction: 'pan-y pinch-zoom', overflowAnchor: 'none' }}
         className="relative overflow-hidden rounded-2xl sm:rounded-3xl select-none"
       >
         {/* Underneath Layer: Next or Previous Page Revealed Live During Flip */}
         {flipDirection && underneathAyahs.length > 0 && (
           <div
             aria-hidden="true"
-            className="absolute inset-0 z-0 rounded-2xl sm:rounded-3xl border-2 border-amber-600/35 bg-[#fbf6e9] dark:bg-[#101826] p-2.5 sm:p-7 text-slate-900 dark:text-amber-50 overflow-hidden"
+            className="absolute inset-0 z-0 rounded-2xl sm:rounded-3xl border-2 border-amber-600/40 bg-[#fbf6e9] dark:bg-[#0f1724] p-2 sm:p-5 text-slate-900 dark:text-amber-50 overflow-hidden"
           >
-            <div className="mb-2 sm:mb-4 flex items-center justify-between border-b border-amber-600/25 pb-1.5 sm:pb-2.5 text-[11px] sm:text-sm font-bold text-amber-900 dark:text-amber-300">
-              <span>{underneathAyahs[0]?.surah?.name || ''}</span>
-              <span className="font-mono-num">
-                صفحة {flipDirection === 'next' ? currentPage + 1 : currentPage - 1}
-              </span>
-            </div>
-            <div dir="rtl" className="font-quran text-[15px] sm:text-[26px] leading-[1.9] sm:leading-[2.35] text-justify">
-              {underneathAyahs.map((a) => (
-                <span key={a.number}>
-                  {a.text}{' '}
-                  <span className="px-0.5 sm:px-1 text-[11px] sm:text-base font-bold text-amber-700 dark:text-amber-400 font-mono-num">
-                    ﴿{a.numberInSurah.toLocaleString('ar-EG')}﴾
-                  </span>{' '}
+            <div className="h-full rounded-xl sm:rounded-2xl border border-amber-600/25 p-2 sm:p-4">
+              <div className="mb-2 sm:mb-3 flex items-center justify-between border-b border-amber-600/25 pb-1.5 text-[11px] sm:text-sm font-bold text-amber-900 dark:text-amber-300">
+                <span>{underneathAyahs[0]?.surah?.name || ''}</span>
+                <span className="font-mono-num">
+                  الجزء {underneathAyahs[0]?.juz || activeJuz} · ص{' '}
+                  {flipDirection === 'next' ? currentPage + 1 : currentPage - 1}
                 </span>
-              ))}
+              </div>
+              <div
+                dir="rtl"
+                className="font-quran text-[17px] sm:text-[26px] leading-[2.05] sm:leading-[2.35] text-justify [text-align-last:center]"
+              >
+                {underneathAyahs.map((a) => (
+                  <span key={a.number} className="inline">
+                    {a.text}{' '}
+                    <span className="inline whitespace-nowrap mx-0.5 text-[0.86em] font-bold text-amber-700 dark:text-amber-400">
+                      ﴿{a.numberInSurah.toLocaleString('ar-EG')}﴾
+                    </span>{' '}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -710,15 +781,13 @@ export function QuranMushaf() {
         {/* Top Turning Page Layer */}
         <div
           style={{
-            transform: flipDirection
-              ? `rotateY(${rotationDeg}deg)`
-              : 'rotateY(0deg)',
+            transform: flipDirection ? `rotateY(${rotationDeg}deg)` : 'rotateY(0deg)',
             transformOrigin: flipDirection === 'next' ? 'left center' : 'right center',
             transformStyle: 'preserve-3d',
             transition: isAnimatingFlip ? 'transform 280ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
             backfaceVisibility: 'hidden',
           }}
-          className="relative z-10 rounded-2xl sm:rounded-3xl border-2 border-amber-600/35 bg-[#fbf6e9] dark:bg-[#101826] p-2.5 sm:p-7 shadow-xl text-slate-900 dark:text-amber-50"
+          className="relative z-10 min-h-[360px] sm:min-h-[520px] rounded-2xl sm:rounded-3xl border-2 border-amber-600/40 bg-[#fbf6e9] dark:bg-[#0f1724] p-2 sm:p-5 shadow-xl text-slate-900 dark:text-amber-50"
         >
           {/* Dynamic Fold Shadow Overlay during Flip */}
           {flipDirection && (
@@ -735,73 +804,153 @@ export function QuranMushaf() {
             />
           )}
 
-          <div className="mb-2 sm:mb-4 flex items-center justify-between border-b border-amber-600/25 pb-1.5 sm:pb-2.5 text-[11px] sm:text-sm font-bold text-amber-900 dark:text-amber-300">
-            <span>{activeSurahHeader}</span>
-            <span className="font-mono-num">صفحة {currentPage}</span>
+          {/* Inner Ornamental Mushaf Page Border */}
+          <div className="rounded-xl sm:rounded-2xl border border-amber-600/25 bg-[#fdf9ef]/70 dark:bg-[#111b2a]/70 p-2.5 sm:p-5">
+            {/* Top Mushaf Page Header */}
+            <div className="mb-2.5 sm:mb-4 flex items-center justify-between border-b border-amber-600/25 pb-1.5 sm:pb-2.5 text-[11px] sm:text-sm font-bold text-amber-900 dark:text-amber-300">
+              <span>{activeSurahHeader}</span>
+              <span className="font-mono-num">
+                الجزء {activeJuz} · صفحة {currentPage}
+              </span>
+            </div>
+
+            {loadingPage && ayahs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center min-h-[300px] sm:min-h-[420px] gap-2 text-slate-500">
+                <Loader2 className="h-6 w-6 sm:h-7 sm:w-7 animate-spin text-amber-600" />
+                <span className="text-xs sm:text-sm font-semibold">جارٍ فتح صفحة المصحف...</span>
+              </div>
+            ) : errorMsg ? (
+              <div className="flex items-center justify-center min-h-[300px] text-center text-sm text-rose-600 dark:text-rose-400 font-semibold">
+                {errorMsg}
+              </div>
+            ) : (
+              <div className={loadingPage ? 'opacity-60 transition-opacity' : ''}>
+                {(() => {
+                  const BISMILLAH = 'بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ';
+                  // Group consecutive ayahs into Surah segments so each Surah starting on this page gets an ornamental banner + continuous justified text block
+                  const segments: Array<{
+                    surahNumber: number;
+                    surahName: string;
+                    startsHere: boolean;
+                    hasBismillahLine: boolean;
+                    ayahs: AyahData[];
+                  }> = [];
+
+                  for (const ayah of ayahs) {
+                    const last = segments[segments.length - 1];
+                    const startsNewSurah = ayah.numberInSurah === 1;
+                    if (!last || last.surahNumber !== ayah.surah.number) {
+                      const hasBismillahLine =
+                        startsNewSurah &&
+                        ayah.surah.number !== 1 &&
+                        ayah.surah.number !== 9 &&
+                        ayah.text.startsWith(BISMILLAH);
+                      segments.push({
+                        surahNumber: ayah.surah.number,
+                        surahName: ayah.surah.name,
+                        startsHere: startsNewSurah,
+                        hasBismillahLine,
+                        ayahs: [ayah],
+                      });
+                    } else {
+                      last.ayahs.push(ayah);
+                    }
+                  }
+
+                  return (
+                    <div className="space-y-3 sm:space-y-4">
+                      {segments.map((seg) => (
+                        <div key={`${currentPage}-s-${seg.surahNumber}`} className="space-y-2 sm:space-y-3">
+                          {seg.startsHere && (
+                            <div className="space-y-1.5 sm:space-y-2">
+                              <div className="rounded-xl border border-amber-600/40 bg-gradient-to-l from-amber-500/10 via-amber-500/20 to-amber-500/10 py-1.5 sm:py-2 px-3 text-center font-quran text-base sm:text-2xl font-bold text-amber-900 dark:text-amber-300 shadow-inner">
+                                ۞ {seg.surahName} ۞
+                              </div>
+                              {seg.hasBismillahLine && (
+                                <p
+                                  dir="rtl"
+                                  className="font-quran text-center text-[17px] sm:text-[24px] font-bold text-emerald-900 dark:text-amber-200 tracking-normal"
+                                >
+                                  {BISMILLAH}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          <p
+                            dir="rtl"
+                            className="font-quran text-[17px] sm:text-[26px] leading-[2.05] sm:leading-[2.35] text-justify [text-align-last:center] tracking-normal select-text"
+                          >
+                            {seg.ayahs.map((ayah) => {
+                              const isRecited =
+                                player.activeTarget?.mode === 'ayah' &&
+                                player.activeTarget.surahNumber === ayah.surah.number &&
+                                player.activeTarget.ayahInSurah === ayah.numberInSurah;
+
+                              const displayText =
+                                seg.hasBismillahLine &&
+                                ayah.numberInSurah === 1 &&
+                                ayah.text.startsWith(BISMILLAH)
+                                  ? ayah.text.slice(BISMILLAH.length).trimStart()
+                                  : ayah.text;
+
+                              const triggerAyah = () => {
+                                setSelectedSurah(ayah.surah.number);
+                                setFromAyah(ayah.numberInSurah);
+                                const meta = surahs.find((s) => s.number === ayah.surah.number);
+                                const endAyah = meta ? meta.numberOfAyahs : ayah.numberInSurah;
+                                setToAyah(endAyah);
+                                player.startRecitation({
+                                  surahNumber: ayah.surah.number,
+                                  surahName: ayah.surah.name,
+                                  fromAyah: ayah.numberInSurah,
+                                  toAyah: endAyah,
+                                  reciter: resolvedAudio.reciter,
+                                  stream: resolvedAudio.stream,
+                                });
+                              };
+
+                              return (
+                                <span
+                                  key={ayah.number}
+                                  ref={isRecited ? activeAyahElemRef : undefined}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={triggerAyah}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      triggerAyah();
+                                    }
+                                  }}
+                                  title="اضغط للتلاوة المتصلة من هذه الآية"
+                                  className={`inline cursor-pointer transition-colors rounded ${
+                                    isRecited
+                                      ? 'bg-amber-400/40 dark:bg-emerald-500/35 text-emerald-950 dark:text-amber-100 underline decoration-amber-600/60 decoration-2 underline-offset-4'
+                                      : 'hover:bg-amber-500/15 active:bg-amber-500/20'
+                                  }`}
+                                >
+                                  {displayText}{' '}
+                                  <span className="inline whitespace-nowrap mx-0.5 text-[0.86em] font-bold text-amber-700 dark:text-amber-400">
+                                    ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
+                                  </span>{' '}
+                                </span>
+                              );
+                            })}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Ornamental Bottom Page Footer */}
+            <div className="mt-3 sm:mt-4 pt-1.5 sm:pt-2 border-t border-amber-600/20 text-center font-quran text-xs sm:text-base font-bold text-amber-800 dark:text-amber-300">
+              ﴿ {currentPage.toLocaleString('ar-EG')} ﴾
+            </div>
           </div>
-
-          {loadingPage ? (
-            <div className="flex flex-col items-center justify-center py-10 sm:py-14 gap-2 text-slate-500">
-              <Loader2 className="h-6 w-6 sm:h-7 sm:w-7 animate-spin text-amber-600" />
-              <span className="text-xs sm:text-sm font-semibold">جارٍ فتح صفحة المصحف...</span>
-            </div>
-          ) : errorMsg ? (
-            <div className="py-10 text-center text-sm text-rose-600 dark:text-rose-400 font-semibold">
-              {errorMsg}
-            </div>
-          ) : (
-            <div
-              dir="rtl"
-              className="font-quran text-[15px] sm:text-[26px] leading-[1.9] sm:leading-[2.35] text-justify tracking-normal select-text"
-            >
-              {ayahs.map((ayah, idx) => {
-                const isRecited =
-                  player.activeTarget?.mode === 'ayah' &&
-                  player.activeTarget.surahNumber === ayah.surah.number &&
-                  player.activeTarget.ayahInSurah === ayah.numberInSurah;
-
-                return (
-                  <React.Fragment key={ayah.number}>
-                    {ayah.numberInSurah === 1 && idx > 0 && (
-                      <div className="my-2.5 sm:my-4 rounded-xl border border-amber-600/30 bg-amber-500/10 py-1 text-center text-sm sm:text-lg font-bold text-amber-800 dark:text-amber-300">
-                        {ayah.surah.name}
-                      </div>
-                    )}
-                    <button
-                      ref={isRecited ? activeAyahElemRef : undefined}
-                      type="button"
-                      onClick={() => {
-                        setSelectedSurah(ayah.surah.number);
-                        setFromAyah(ayah.numberInSurah);
-                        const meta = surahs.find((s) => s.number === ayah.surah.number);
-                        const endAyah = meta ? meta.numberOfAyahs : ayah.numberInSurah;
-                        setToAyah(endAyah);
-                        player.startRecitation({
-                          surahNumber: ayah.surah.number,
-                          surahName: ayah.surah.name,
-                          fromAyah: ayah.numberInSurah,
-                          toAyah: endAyah,
-                          reciter: resolvedAudio.reciter,
-                          stream: resolvedAudio.stream,
-                        });
-                      }}
-                      title="اضغط للتلاوة المتصلة من هذه الآية"
-                      className={`inline text-right transition-colors rounded-lg px-0.5 sm:px-1 ${
-                        isRecited
-                          ? 'bg-amber-400/40 dark:bg-emerald-500/35 ring-2 ring-amber-500/70 text-emerald-950 dark:text-amber-100'
-                          : 'hover:bg-amber-500/10'
-                      }`}
-                    >
-                      {ayah.text}{' '}
-                      <span className="inline-flex items-center justify-center px-0.5 sm:px-1 text-[11px] sm:text-base font-bold text-amber-700 dark:text-amber-400 font-mono-num">
-                        ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
-                      </span>{' '}
-                    </button>
-                  </React.Fragment>
-                );
-              })}
-            </div>
-          )}
         </div>
       </div>
     </div>
