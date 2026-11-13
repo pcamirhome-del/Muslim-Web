@@ -12,13 +12,15 @@ import {
   BookOpen,
   Clock,
   Sparkles,
-  Droplets,
   Volume2,
   Share2,
   BookText,
   ShieldCheck,
   ScrollText,
   Settings,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
 } from 'lucide-react';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 
@@ -39,7 +41,7 @@ interface SideDrawerProps {
   onSelectTab: (tab: AppSection) => void;
   isDark: boolean;
   onToggleTheme: () => void;
-  onOpenGuide: (mode: 'wudu' | 'prayer') => void;
+  onOpenGuide?: (mode: 'wudu' | 'prayer') => void;
   ramadanPreview: boolean;
   onToggleRamadanPreview: () => void;
 }
@@ -51,18 +53,33 @@ export function SideDrawer({
   onSelectTab,
   isDark,
   onToggleTheme,
-  onOpenGuide,
   ramadanPreview,
   onToggleRamadanPreview,
 }: SideDrawerProps) {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
+  const [showSettingsSubMenu, setShowSettingsSubMenu] = useState(false);
+  const [expandedSettingOption, setExpandedSettingOption] = useState<
+    'theme' | 'ramadan' | 'adhan' | 'advanced' | null
+  >(null);
 
   if (!open) return null;
 
   const navigate = (tab: AppSection) => {
     onSelectTab(tab);
+    setShowSettingsSubMenu(false);
+    setExpandedSettingOption(null);
     onClose();
+  };
+
+  const handleClose = () => {
+    setShowSettingsSubMenu(false);
+    setExpandedSettingOption(null);
+    onClose();
+  };
+
+  const toggleSettingOption = (opt: 'theme' | 'ramadan' | 'adhan' | 'advanced') => {
+    setExpandedSettingOption((prev) => (prev === opt ? null : opt));
   };
 
   return (
@@ -88,7 +105,7 @@ export function SideDrawer({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             aria-label="إغلاق القائمة"
             className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
           >
@@ -97,6 +114,181 @@ export function SideDrawer({
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+          {showSettingsSubMenu ? (
+            <div className="space-y-2.5">
+              {/* Top Back Header inside Settings Side Menu */}
+              <div className="flex items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSettingsSubMenu(false);
+                    setExpandedSettingOption(null);
+                  }}
+                  className="flex min-h-[40px] items-center gap-1.5 rounded-xl bg-slate-100 dark:bg-slate-900 px-3 py-1.5 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <ChevronRight className="h-4 w-4 shrink-0" />
+                  <span>رجوع للقائمة</span>
+                </button>
+                <span className="text-sm font-extrabold text-amber-600 dark:text-amber-400">
+                  الإعدادات
+                </span>
+              </div>
+
+              {/* Option 1: Theme Switcher */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleSettingOption('theme')}
+                  className="flex w-full min-h-[44px] items-center justify-between gap-2 px-3 py-2.5 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
+                >
+                  <span className="flex items-center gap-2.5">
+                    {isDark ? (
+                      <Sun className="h-5 w-5 text-amber-400 shrink-0" />
+                    ) : (
+                      <Moon className="h-5 w-5 text-indigo-600 shrink-0" />
+                    )}
+                    <span>المظهر النهاري والليلي</span>
+                  </span>
+                  {expandedSettingOption === 'theme' ? (
+                    <ChevronUp className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 shrink-0" />
+                  )}
+                </button>
+
+                {expandedSettingOption === 'theme' && (
+                  <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/70 p-3 space-y-2">
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      الوضع النشط حالياً:{' '}
+                      <strong className="text-amber-600 dark:text-amber-400">
+                        {isDark ? 'المظهر الليلي (Dark)' : 'المظهر النهاري (Light)'}
+                      </strong>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={onToggleTheme}
+                      className="w-full min-h-[40px] flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold transition-colors"
+                    >
+                      {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                      <span>
+                        {isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع الليلي'}
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Option 2: Ramadan Preview */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleSettingOption('ramadan')}
+                  className="flex w-full min-h-[44px] items-center justify-between gap-2 px-3 py-2.5 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Sparkles className="h-5 w-5 text-amber-500 shrink-0" />
+                    <span>معاينة قسم شهر رمضان المبارك</span>
+                  </span>
+                  {expandedSettingOption === 'ramadan' ? (
+                    <ChevronUp className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 shrink-0" />
+                  )}
+                </button>
+
+                {expandedSettingOption === 'ramadan' && (
+                  <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/70 p-3 space-y-2">
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                      حالة المعاينة:{' '}
+                      <strong className="text-amber-600 dark:text-amber-400">
+                        {ramadanPreview ? 'مُفعّلة وتظهر في مواقيت الصلاة' : 'متوقفة حالياً'}
+                      </strong>
+                      . تعرض مواعيد الإمساك والإفطار والتهجد.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onToggleRamadanPreview();
+                        navigate('home');
+                      }}
+                      className="w-full min-h-[40px] rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-colors"
+                    >
+                      {ramadanPreview ? 'إخفاء معاينة رمضان' : 'تفعيل وعرض قسم رمضان'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Option 3: Adhan & Audio Dhikr */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleSettingOption('adhan')}
+                  className="flex w-full min-h-[44px] items-center justify-between gap-2 px-3 py-2.5 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Volume2 className="h-5 w-5 text-emerald-500 shrink-0" />
+                    <span>الأذان والأذكار الصوتية</span>
+                  </span>
+                  {expandedSettingOption === 'adhan' ? (
+                    <ChevronUp className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 shrink-0" />
+                  )}
+                </button>
+
+                {expandedSettingOption === 'adhan' && (
+                  <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/70 p-3 space-y-2">
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                      تحكم بصوت الـ ١١ مؤذناً، التنبيه المسبق قبل الأذان بـ ١٠ دقائق، ومنبه الأذكار الصوتية الدورية (١ إلى ٥ دقائق).
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigate('home')}
+                      className="w-full min-h-[40px] rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold transition-colors"
+                    >
+                      فتح لوحة الأذان والأذكار
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Option 4: Advanced Settings & Full Quran Offline Downloader */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleSettingOption('advanced')}
+                  className="flex w-full min-h-[44px] items-center justify-between gap-2 px-3 py-2.5 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Settings className="h-5 w-5 text-amber-500 shrink-0" />
+                    <span>الإعدادات المتقدمة والتحميل الكامل</span>
+                  </span>
+                  {expandedSettingOption === 'advanced' ? (
+                    <ChevronUp className="h-4 w-4 shrink-0" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 shrink-0" />
+                  )}
+                </button>
+
+                {expandedSettingOption === 'advanced' && (
+                  <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/70 p-3 space-y-2">
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                      مدير تحميل القرآن الكريم بالكامل (١١٤ سورة بدون إنترنت)، إدارة المساحة، وإدارة أذونات الإشعارات.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigate('settings')}
+                      className="w-full min-h-[40px] rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-colors"
+                    >
+                      فتح شاشة التحميل الكامل والإعدادات
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <>
           {/* Phase 4 Top Islamic Encyclopedia Sections (Tafsir first at very top) */}
           <div className="space-y-1.5">
             <p className="px-2 text-xs font-bold text-amber-600 dark:text-amber-400">
@@ -107,7 +299,7 @@ export function SideDrawer({
               { id: 'hisn' as AppSection, label: 'حصن المسلم وفقه الصلوات', icon: ShieldCheck },
               {
                 id: 'hadith' as AppSection,
-                label: 'الأحاديث النبوية والتحميل المباشر',
+                label: 'الأحاديث النبوية',
                 icon: ScrollText,
               },
             ].map((item) => {
@@ -137,10 +329,10 @@ export function SideDrawer({
               الأقسام الرئيسية
             </p>
             {[
-              { id: 'home' as AppSection, label: 'الرئيسية ومواقيت الصلاة', icon: Clock },
-              { id: 'radio' as AppSection, label: 'البث المباشر وإذاعة القرآن', icon: Radio },
-              { id: 'qibla' as AppSection, label: 'بوصلة القبلة الحقيقية', icon: Compass },
-              { id: 'quran' as AppSection, label: 'المصحف الشريف التفاعلي', icon: BookOpen },
+              { id: 'home' as AppSection, label: 'مواقيت الصلاة', icon: Clock },
+              { id: 'radio' as AppSection, label: 'إذاعة القرآن مباشر', icon: Radio },
+              { id: 'qibla' as AppSection, label: 'القبلة', icon: Compass },
+              { id: 'quran' as AppSection, label: 'المصحف الشريف', icon: BookOpen },
             ].map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;
@@ -162,98 +354,22 @@ export function SideDrawer({
             })}
           </div>
 
-          {/* Education Shortcuts */}
-          <div className="space-y-1.5 border-t border-slate-200 dark:border-slate-800 pt-4">
-            <p className="px-2 text-xs font-bold text-slate-500 dark:text-slate-400">
-              التعليم والعبادات
-            </p>
+          {/* Single Settings Entry replacing Customization & Preview */}
+          <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
             <button
               type="button"
-              onClick={() => {
-                onClose();
-                onOpenGuide('wudu');
-              }}
-              className="flex w-full min-h-[44px] items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
-            >
-              <Droplets className="h-5 w-5 text-sky-500 shrink-0" />
-              <span>تعليم الوضوء الصحيح</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onOpenGuide('prayer');
-              }}
-              className="flex w-full min-h-[44px] items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
-            >
-              <BookOpen className="h-5 w-5 text-emerald-500 shrink-0" />
-              <span>تعليم صفة الصلاة بالتشكيل</span>
-            </button>
-          </div>
-
-          {/* Appearance & Preferences */}
-          <div className="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-4">
-            <p className="px-2 text-xs font-bold text-slate-500 dark:text-slate-400">
-              التخصيص والمعاينة
-            </p>
-            <button
-              type="button"
-              onClick={onToggleTheme}
-              className="flex w-full min-h-[44px] items-center justify-between rounded-xl border border-slate-200 dark:border-slate-800 px-3 py-2.5 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
-            >
-              <span className="flex items-center gap-2.5">
-                {isDark ? (
-                  <Sun className="h-5 w-5 text-amber-400" />
-                ) : (
-                  <Moon className="h-5 w-5 text-indigo-600" />
-                )}
-                <span>{isDark ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع الليلي'}</span>
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                onToggleRamadanPreview();
-                navigate('home');
-              }}
-              className={`flex w-full min-h-[44px] items-center justify-between rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors ${
-                ramadanPreview
-                  ? 'border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-300'
-                  : 'border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-900'
-              }`}
-            >
-              <span className="flex items-center gap-2.5">
-                <Sparkles className="h-5 w-5 text-amber-500" />
-                <span>معاينة قسم شهر رمضان المبارك</span>
-              </span>
-              <span className="text-xs">{ramadanPreview ? 'مُفعّل' : 'إظهار'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                navigate('settings');
-              }}
-              className={`flex w-full min-h-[44px] items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors ${
+              onClick={() => setShowSettingsSubMenu(true)}
+              className={`flex w-full min-h-[44px] items-center justify-between gap-2.5 rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors ${
                 activeTab === 'settings'
                   ? 'border-amber-500 bg-amber-600 text-white'
                   : 'border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-900'
               }`}
             >
-              <Settings className="h-5 w-5 shrink-0" />
-              <span>الإعدادات المتقدمة والتحميل الكامل</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                navigate('home');
-              }}
-              className="flex w-full min-h-[44px] items-center gap-2.5 rounded-xl border border-slate-200 dark:border-slate-800 px-3 py-2.5 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors"
-            >
-              <Volume2 className="h-5 w-5 text-emerald-500" />
-              <span>الأذان والأذكار الصوتية (الرئيسية)</span>
+              <span className="flex items-center gap-2.5">
+                <Settings className="h-5 w-5 shrink-0" />
+                <span>الإعدادات</span>
+              </span>
+              <ChevronDown className="h-4 w-4 shrink-0 rotate-90" />
             </button>
           </div>
 
@@ -281,6 +397,8 @@ export function SideDrawer({
               )}
             </div>
           )}
+            </>
+          )}
         </div>
 
         <div className="border-t border-slate-200 dark:border-slate-800 p-3 text-center text-xs text-slate-600 dark:text-slate-400">
@@ -292,7 +410,7 @@ export function SideDrawer({
       <button
         type="button"
         aria-label="إغلاق القائمة الجانبية"
-        onClick={onClose}
+        onClick={handleClose}
         className="flex-1 cursor-default"
       />
 

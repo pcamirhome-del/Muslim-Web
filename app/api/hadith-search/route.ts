@@ -61,7 +61,7 @@ async function loadEdition(slug: string): Promise<FawazHadithItem[]> {
     return cached.data;
   }
   const url = `https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions/${slug}.min.json`;
-  const res = await fetch(url, { next: { revalidate: 86400 } });
+  const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) return cached?.data || [];
   const json = (await res.json()) as FawazEditionResponse;
   const list = (json.hadiths || []).filter((h) => h.text && h.text.trim().length > 10);

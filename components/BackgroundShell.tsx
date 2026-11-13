@@ -64,12 +64,18 @@ export function BackgroundShell({ isHome, isDark, children }: BackgroundShellPro
       {/* Center Glassmorphic Shell leaving slender lateral edges showing sacred imagery */}
       <div className="relative z-10 mx-auto min-h-screen w-full max-w-5xl px-2 sm:px-4">
         <div
-          className={`flex min-h-screen flex-col border-x transition-colors duration-300 backdrop-blur-xl shadow-2xl ${
+          className={`relative flex min-h-screen flex-col border-x transition-colors duration-300 shadow-2xl ${
             isDark
-              ? 'border-amber-500/20 bg-slate-950/88 text-white'
-              : 'border-amber-700/20 bg-white/92 text-slate-900'
+              ? 'border-amber-500/20 text-white'
+              : 'border-amber-700/20 text-slate-900'
           }`}
         >
+          <div
+            aria-hidden="true"
+            className={`pointer-events-none absolute inset-0 -z-10 backdrop-blur-xl transition-colors duration-300 ${
+              isDark ? 'bg-slate-950/88' : 'bg-white/92'
+            }`}
+          />
           {children}
         </div>
       </div>

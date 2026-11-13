@@ -718,12 +718,12 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
                     : 'border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/60 hover:border-amber-500/40'
                 }`}
               >
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold truncate">{clip.label}</p>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-300 truncate">
+                <span className="block min-w-0 flex-1">
+                  <span className="block text-xs font-bold truncate">{clip.label}</span>
+                  <span className="block text-[11px] text-slate-600 dark:text-slate-300 truncate">
                     {clip.egyptianPrompt}
-                  </p>
-                </div>
+                  </span>
+                </span>
                 <span
                   className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white ${
                     isPlaying ? 'bg-rose-600' : 'bg-emerald-700'

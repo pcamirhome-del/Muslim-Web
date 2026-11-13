@@ -1,5 +1,5 @@
-const CACHE_NAME = 'noor-islam-v4';
-const API_CACHE_NAME = 'noor-islam-api-v4';
+const CACHE_NAME = 'noor-islam-v5';
+const API_CACHE_NAME = 'noor-islam-api-v5';
 const OFFLINE_AUDIO_CACHE = 'noor-quran-audio-v1';
 const OFFLINE_TEXT_CACHE = 'noor-quran-pages-v1';
 const OFFLINE_MEDIA_CACHE = 'noor-media-downloads-v1';
@@ -113,8 +113,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Same-origin assets & pages
+  // Same-origin assets & pages (skip /api/ and HMR sockets)
   if (url.origin === self.location.origin) {
+    if (url.pathname.startsWith('/api/') || url.pathname.includes('webpack-hmr')) {
+      return;
+    }
+
     if (request.mode === 'navigate') {
       event.respondWith(
         fetch(request)
@@ -124,6 +128,22 @@ self.addEventListener('fetch', (event) => {
             return response;
           })
           .catch(() => caches.match('/') || caches.match(request))
+      );
+      return;
+    }
+
+    // Network-first for Next.js JS/CSS chunks so fresh SSR HTML never hydrates against stale cached JS
+    if (url.pathname.startsWith('/_next/')) {
+      event.respondWith(
+        fetch(request)
+          .then((response) => {
+            if (response.ok) {
+              const copy = response.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+            }
+            return response;
+          })
+          .catch(() => caches.match(request))
       );
       return;
     }

@@ -36,7 +36,7 @@ async function getSharawiArchiveIndex(): Promise<ArchiveFileEntry[]> {
   }
   const res = await fetch(
     'https://archive.org/metadata/Khwater.El-Sharawy.Fi.Tafsir.EL-Quran-Karim-Up_ReDa_MoHamMeD/files',
-    { next: { revalidate: 3600 } }
+    { cache: 'no-store' }
   );
   if (!res.ok) return cachedSharawiFiles || [];
   const json = (await res.json()) as { result?: ArchiveFileEntry[] };

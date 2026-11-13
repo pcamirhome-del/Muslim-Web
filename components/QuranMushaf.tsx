@@ -106,6 +106,7 @@ export function QuranMushaf() {
   const [isAnimatingFlip, setIsAnimatingFlip] = useState<boolean>(false);
 
   const pointerStartRef = useRef<{ x: number; y: number; active: boolean } | null>(null);
+  const activePointersRef = useRef<Set<number>>(new Set());
   const pageContainerRef = useRef<HTMLDivElement | null>(null);
   const activeAyahElemRef = useRef<HTMLButtonElement | null>(null);
   const lastSyncedSurahRef = useRef<number>(1);
@@ -286,14 +287,24 @@ export function QuranMushaf() {
     [currentPage, isAnimatingFlip]
   );
 
-  // Touch / Pointer Realistic 3D Page Drag Handlers
+  // Touch / Pointer Realistic 3D Page Drag Handlers (multi-touch safe for user pinch-zoom)
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (isAnimatingFlip) return;
+    activePointersRef.current.add(e.pointerId);
+    if (activePointersRef.current.size > 1 || !e.isPrimary || isAnimatingFlip) {
+      pointerStartRef.current = null;
+      return;
+    }
     pointerStartRef.current = { x: e.clientX, y: e.clientY, active: true };
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!pointerStartRef.current?.active || isAnimatingFlip) return;
+    if (
+      activePointersRef.current.size > 1 ||
+      !pointerStartRef.current?.active ||
+      isAnimatingFlip
+    ) {
+      return;
+    }
     const dx = e.clientX - pointerStartRef.current.x;
     const dy = e.clientY - pointerStartRef.current.y;
 
@@ -311,7 +322,12 @@ export function QuranMushaf() {
     }
   };
 
-  const finishDrag = () => {
+  const finishDrag = (e?: React.PointerEvent<HTMLDivElement>) => {
+    if (e) {
+      activePointersRef.current.delete(e.pointerId);
+    } else {
+      activePointersRef.current.clear();
+    }
     if (!pointerStartRef.current?.active) return;
     pointerStartRef.current = null;
 
@@ -480,7 +496,7 @@ export function QuranMushaf() {
           value={selectedSurah}
           onChange={(e) => handleSelectSurah(Number(e.target.value))}
           aria-label="اختيار السورة"
-          className="min-h-[44px] w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-2 text-xs sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+          className="min-h-[44px] w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-2 text-base sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
         >
           {surahs.length === 0 ? (
             <option value={1}>١. سورة الفاتحة</option>
@@ -500,7 +516,7 @@ export function QuranMushaf() {
             setSelectedReciterId(e.target.value);
           }}
           aria-label="اختيار القارئ"
-          className="min-h-[44px] w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-2 text-xs sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+          className="min-h-[44px] w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-2 text-base sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
         >
           {QURAN_RECITERS.map((r) => (
             <option key={r.id} value={r.id}>
@@ -517,7 +533,7 @@ export function QuranMushaf() {
             setSelectedRiwayah(e.target.value as RiwayahId);
           }}
           aria-label="اختيار الرواية والقراءة"
-          className="col-span-2 w-full min-h-[44px] rounded-xl border border-amber-500/35 bg-white dark:bg-slate-900 px-2.5 py-2 text-xs sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+          className="col-span-2 w-full min-h-[44px] rounded-xl border border-amber-500/35 bg-white dark:bg-slate-900 px-2.5 py-2 text-base sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
         >
           {RIWAYAH_OPTIONS.map((rw) => (
             <option key={rw.id} value={rw.id}>
@@ -542,7 +558,7 @@ export function QuranMushaf() {
           )}
         </div>
 
-        {/* Verse Range Pickers */}
+        {/* Verse Range Pickers (16px on mobile prevents browser auto-zoom on focus) */}
         <div className="grid grid-cols-3 gap-2 items-center">
           <label className="flex items-center gap-1.5 text-xs font-bold">
             <span className="shrink-0">من آية:</span>
@@ -556,7 +572,7 @@ export function QuranMushaf() {
                 setFromAyah(v);
                 if (toAyah < v) setToAyah(v);
               }}
-              className="min-h-[40px] w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 text-center font-mono-num text-xs font-bold"
+              className="min-h-[40px] w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 text-center font-mono-num text-base sm:text-xs font-bold"
             />
           </label>
 
@@ -574,7 +590,7 @@ export function QuranMushaf() {
                 );
                 setToAyah(v);
               }}
-              className="min-h-[40px] w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 text-center font-mono-num text-xs font-bold"
+              className="min-h-[40px] w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 text-center font-mono-num text-base sm:text-xs font-bold"
             />
           </label>
 
@@ -656,33 +672,33 @@ export function QuranMushaf() {
         )}
       </div>
 
-      {/* Realistic 3D Page-Flipping Mushaf Stage */}
+      {/* Realistic 3D Page-Flipping Mushaf Stage (Compact readable mobile frame + manual pinch-zoom allowed) */}
       <div
         ref={pageContainerRef}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
-        onPointerUp={finishDrag}
-        onPointerCancel={finishDrag}
-        style={{ perspective: '1800px', touchAction: 'pan-y' }}
-        className="relative overflow-hidden rounded-3xl select-none"
+        onPointerUp={(e) => finishDrag(e)}
+        onPointerCancel={(e) => finishDrag(e)}
+        style={{ perspective: '1800px', touchAction: 'pan-y pinch-zoom' }}
+        className="relative overflow-hidden rounded-2xl sm:rounded-3xl select-none"
       >
         {/* Underneath Layer: Next or Previous Page Revealed Live During Flip */}
         {flipDirection && underneathAyahs.length > 0 && (
           <div
             aria-hidden="true"
-            className="absolute inset-0 z-0 rounded-3xl border-2 border-amber-600/35 bg-[#fbf6e9] dark:bg-[#101826] p-4 sm:p-7 text-slate-900 dark:text-amber-50 overflow-hidden"
+            className="absolute inset-0 z-0 rounded-2xl sm:rounded-3xl border-2 border-amber-600/35 bg-[#fbf6e9] dark:bg-[#101826] p-2.5 sm:p-7 text-slate-900 dark:text-amber-50 overflow-hidden"
           >
-            <div className="mb-4 flex items-center justify-between border-b border-amber-600/25 pb-2.5 text-xs sm:text-sm font-bold text-amber-900 dark:text-amber-300">
+            <div className="mb-2 sm:mb-4 flex items-center justify-between border-b border-amber-600/25 pb-1.5 sm:pb-2.5 text-[11px] sm:text-sm font-bold text-amber-900 dark:text-amber-300">
               <span>{underneathAyahs[0]?.surah?.name || ''}</span>
               <span className="font-mono-num">
                 صفحة {flipDirection === 'next' ? currentPage + 1 : currentPage - 1}
               </span>
             </div>
-            <div dir="rtl" className="font-quran text-2xl sm:text-[28px] leading-[2.35] text-justify">
+            <div dir="rtl" className="font-quran text-[15px] sm:text-[26px] leading-[1.9] sm:leading-[2.35] text-justify">
               {underneathAyahs.map((a) => (
                 <span key={a.number}>
                   {a.text}{' '}
-                  <span className="px-1 text-base font-bold text-amber-700 dark:text-amber-400 font-mono-num">
+                  <span className="px-0.5 sm:px-1 text-[11px] sm:text-base font-bold text-amber-700 dark:text-amber-400 font-mono-num">
                     ﴿{a.numberInSurah.toLocaleString('ar-EG')}﴾
                   </span>{' '}
                 </span>
@@ -702,7 +718,7 @@ export function QuranMushaf() {
             transition: isAnimatingFlip ? 'transform 280ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
             backfaceVisibility: 'hidden',
           }}
-          className="relative z-10 rounded-3xl border-2 border-amber-600/35 bg-[#fbf6e9] dark:bg-[#101826] p-4 sm:p-7 shadow-xl text-slate-900 dark:text-amber-50"
+          className="relative z-10 rounded-2xl sm:rounded-3xl border-2 border-amber-600/35 bg-[#fbf6e9] dark:bg-[#101826] p-2.5 sm:p-7 shadow-xl text-slate-900 dark:text-amber-50"
         >
           {/* Dynamic Fold Shadow Overlay during Flip */}
           {flipDirection && (
@@ -715,19 +731,19 @@ export function QuranMushaf() {
                     ? 'linear-gradient(to right, rgba(0,0,0,0.45), transparent 55%)'
                     : 'linear-gradient(to left, rgba(0,0,0,0.45), transparent 55%)',
               }}
-              className="pointer-events-none absolute inset-0 z-20 rounded-3xl"
+              className="pointer-events-none absolute inset-0 z-20 rounded-2xl sm:rounded-3xl"
             />
           )}
 
-          <div className="mb-4 flex items-center justify-between border-b border-amber-600/25 pb-2.5 text-xs sm:text-sm font-bold text-amber-900 dark:text-amber-300">
+          <div className="mb-2 sm:mb-4 flex items-center justify-between border-b border-amber-600/25 pb-1.5 sm:pb-2.5 text-[11px] sm:text-sm font-bold text-amber-900 dark:text-amber-300">
             <span>{activeSurahHeader}</span>
             <span className="font-mono-num">صفحة {currentPage}</span>
           </div>
 
           {loadingPage ? (
-            <div className="flex flex-col items-center justify-center py-14 gap-2 text-slate-500">
-              <Loader2 className="h-7 w-7 animate-spin text-amber-600" />
-              <span className="text-sm font-semibold">جارٍ فتح صفحة المصحف...</span>
+            <div className="flex flex-col items-center justify-center py-10 sm:py-14 gap-2 text-slate-500">
+              <Loader2 className="h-6 w-6 sm:h-7 sm:w-7 animate-spin text-amber-600" />
+              <span className="text-xs sm:text-sm font-semibold">جارٍ فتح صفحة المصحف...</span>
             </div>
           ) : errorMsg ? (
             <div className="py-10 text-center text-sm text-rose-600 dark:text-rose-400 font-semibold">
@@ -736,7 +752,7 @@ export function QuranMushaf() {
           ) : (
             <div
               dir="rtl"
-              className="font-quran text-2xl sm:text-[28px] leading-[2.35] text-justify tracking-normal select-text"
+              className="font-quran text-[15px] sm:text-[26px] leading-[1.9] sm:leading-[2.35] text-justify tracking-normal select-text"
             >
               {ayahs.map((ayah, idx) => {
                 const isRecited =
@@ -747,7 +763,7 @@ export function QuranMushaf() {
                 return (
                   <React.Fragment key={ayah.number}>
                     {ayah.numberInSurah === 1 && idx > 0 && (
-                      <div className="my-4 rounded-xl border border-amber-600/30 bg-amber-500/10 py-1.5 text-center text-lg font-bold text-amber-800 dark:text-amber-300">
+                      <div className="my-2.5 sm:my-4 rounded-xl border border-amber-600/30 bg-amber-500/10 py-1 text-center text-sm sm:text-lg font-bold text-amber-800 dark:text-amber-300">
                         {ayah.surah.name}
                       </div>
                     )}
@@ -770,14 +786,14 @@ export function QuranMushaf() {
                         });
                       }}
                       title="اضغط للتلاوة المتصلة من هذه الآية"
-                      className={`inline text-right transition-colors rounded-lg px-1 ${
+                      className={`inline text-right transition-colors rounded-lg px-0.5 sm:px-1 ${
                         isRecited
                           ? 'bg-amber-400/40 dark:bg-emerald-500/35 ring-2 ring-amber-500/70 text-emerald-950 dark:text-amber-100'
                           : 'hover:bg-amber-500/10'
                       }`}
                     >
                       {ayah.text}{' '}
-                      <span className="inline-flex items-center justify-center px-1 text-base font-bold text-amber-700 dark:text-amber-400 font-mono-num">
+                      <span className="inline-flex items-center justify-center px-0.5 sm:px-1 text-[11px] sm:text-base font-bold text-amber-700 dark:text-amber-400 font-mono-num">
                         ﴿{ayah.numberInSurah.toLocaleString('ar-EG')}﴾
                       </span>{' '}
                     </button>

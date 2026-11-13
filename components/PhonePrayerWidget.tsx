@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Clock, Smartphone, Download, Share2, MapPin } from 'lucide-react';
 import { NextPrayerInfo, UserLocation, getTimezoneSeasonInfo } from '@/lib/prayer-utils';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
@@ -18,8 +18,16 @@ export function PhonePrayerWidget({
 }: PhonePrayerWidgetProps) {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showWidgetHelp, setShowWidgetHelp] = useState(false);
+  const [seasonInfo, setSeasonInfo] = useState<ReturnType<typeof getTimezoneSeasonInfo> | null>(
+    null
+  );
 
-  const seasonInfo = getTimezoneSeasonInfo(timezone);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSeasonInfo(getTimezoneSeasonInfo(timezone));
+    }, 0);
+    return () => clearTimeout(t);
+  }, [timezone]);
 
   return (
     <section
@@ -33,10 +41,14 @@ export function PhonePrayerWidget({
             {location.city}
             {location.country ? ` · ${location.country}` : ''}
           </span>
-          <span aria-hidden="true">·</span>
-          <span>
-            {seasonInfo.seasonLabel} ({seasonInfo.offsetLabel})
-          </span>
+          {seasonInfo && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>
+                {seasonInfo.seasonLabel} ({seasonInfo.offsetLabel})
+              </span>
+            </>
+          )}
         </div>
 
         {!isInstalled && (

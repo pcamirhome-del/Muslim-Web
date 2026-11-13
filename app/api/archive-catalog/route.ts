@@ -52,13 +52,22 @@ const JUZ_SURAH_MAP: Array<{ juz: number; label: string; surahNumbers: number[] 
   { juz: 30, label: 'الجزء الثلاثون (جزء عمّ — من النبأ إلى الناس)', surahNumbers: [78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114] },
 ];
 
+let cachedCatalog: { prophets: DownloadableMediaItem[]; sharawi: DownloadableMediaItem[]; fetchedAt: number } | null = null;
+
 export async function GET() {
+  if (cachedCatalog && Date.now() - cachedCatalog.fetchedAt < 1000 * 60 * 60 * 6) {
+    return NextResponse.json({
+      prophets: cachedCatalog.prophets,
+      sharawi: cachedCatalog.sharawi,
+    });
+  }
+
   try {
     const [prophetsRes, sharawiRes] = await Promise.all([
-      fetch('https://archive.org/metadata/02_20251028/files', { next: { revalidate: 86400 } }),
+      fetch('https://archive.org/metadata/02_20251028/files', { cache: 'no-store' }),
       fetch(
         'https://archive.org/metadata/Khwater.El-Sharawy.Fi.Tafsir.EL-Quran-Karim-Up_ReDa_MoHamMeD/files',
-        { next: { revalidate: 86400 } }
+        { cache: 'no-store' }
       ),
     ]);
 
@@ -134,6 +143,10 @@ export async function GET() {
         sizeLabel: bytes > 0 ? `${(bytes / 1048576).toFixed(1)} MB` : 'MP3',
       };
     });
+
+    if (prophets.length > 0 || sharawi.length > 0) {
+      cachedCatalog = { prophets, sharawi, fetchedAt: Date.now() };
+    }
 
     return NextResponse.json({ prophets, sharawi });
   } catch {

@@ -55,7 +55,10 @@ export function IslamicApp() {
   // Register Service Worker & read URL shortcut tab + saved theme/location
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((reg) => reg.update().catch(() => {}))
+        .catch(() => {});
     }
 
     const initTimer = setTimeout(() => {
