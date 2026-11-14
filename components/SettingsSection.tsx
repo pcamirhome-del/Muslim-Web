@@ -27,12 +27,19 @@ import {
   resolveReciterAndStream,
 } from '@/lib/data/quran-reciters';
 import {
+  DEFAULT_DHIKR_SCHEDULES,
   DEFAULT_SELECTED_DHIKR_IDS,
+  DhikrAudioClip,
+  DhikrScheduleMap,
+  DhikrScheduleTiming,
   DhikrVoiceMode,
   EGYPTIAN_DHIKR_CLIPS,
   MUADHINS_LIST,
+  formatTime24To12Ar,
+  parseDhikrSchedules,
   parseSelectedDhikrIds,
 } from '@/lib/data/audio-library';
+import { DhikrTimeModal } from '@/components/DhikrTimeModal';
 import { useFullQuranDownloader } from '@/hooks/useFullQuranDownloader';
 
 interface SettingsSectionProps {
@@ -65,6 +72,8 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
   const [dhikrInterval, setDhikrInterval] = useState<number>(3);
   const [dhikrMode, setDhikrMode] = useState<DhikrVoiceMode>('egyptian_dhikr');
   const [selectedDhikrIds, setSelectedDhikrIds] = useState<string[]>(DEFAULT_SELECTED_DHIKR_IDS);
+  const [dhikrSchedules, setDhikrSchedules] = useState<DhikrScheduleMap>(DEFAULT_DHIKR_SCHEDULES);
+  const [timeModalClip, setTimeModalClip] = useState<DhikrAudioClip | null>(null);
 
   // Full Quran Offline Downloader Selection
   const [selectedReciterId, setSelectedReciterId] = useState<string>('abdulbasit');
@@ -79,46 +88,56 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
     [selectedReciterId, selectedRiwayah]
   );
 
-  // Sync initial preferences from localStorage
+  const syncFromStorage = useCallback(() => {
+    try {
+      const sAdhan = localStorage.getItem('noor_adhan_enabled');
+      if (sAdhan !== null) setAdhanAudioEnabled(sAdhan === 'true');
+
+      const sAdhanNotif = localStorage.getItem('noor_adhan_notif_enabled');
+      if (sAdhanNotif !== null) setAdhanNotifEnabled(sAdhanNotif === 'true');
+
+      const sPre = localStorage.getItem('noor_pre_adhan_enabled');
+      if (sPre !== null) setPreAdhanEnabled(sPre === 'true');
+
+      const sMuadhin = localStorage.getItem('noor_muadhin_id');
+      if (sMuadhin && MUADHINS_LIST.some((m) => m.id === sMuadhin)) {
+        setMuadhinId(sMuadhin);
+      }
+
+      const sDhikrEnabled = localStorage.getItem('noor_dhikr_enabled');
+      if (sDhikrEnabled !== null) setDhikrEnabled(sDhikrEnabled === 'true');
+
+      const sInterval = Number(localStorage.getItem('noor_dhikr_interval'));
+      if (sInterval >= 1 && sInterval <= 5) setDhikrInterval(sInterval);
+
+      const sMode = localStorage.getItem('noor_dhikr_mode') as DhikrVoiceMode | null;
+      if (sMode === 'egyptian_dhikr' || sMode === 'sheikh') setDhikrMode(sMode);
+
+      setSelectedDhikrIds(parseSelectedDhikrIds(localStorage.getItem('noor_selected_dhikrs')));
+      setDhikrSchedules(parseDhikrSchedules(localStorage.getItem('noor_dhikr_schedules')));
+    } catch {
+      // ignore storage errors
+    }
+
+    if (typeof Notification === 'undefined') {
+      setNotifPermission('unsupported');
+    } else {
+      setNotifPermission(Notification.permission);
+    }
+  }, []);
+
+  // Sync initial preferences from localStorage & listen to external updates
   useEffect(() => {
     const timer = setTimeout(() => {
-      try {
-        const sAdhan = localStorage.getItem('noor_adhan_enabled');
-        if (sAdhan !== null) setAdhanAudioEnabled(sAdhan === 'true');
-
-        const sAdhanNotif = localStorage.getItem('noor_adhan_notif_enabled');
-        if (sAdhanNotif !== null) setAdhanNotifEnabled(sAdhanNotif === 'true');
-
-        const sPre = localStorage.getItem('noor_pre_adhan_enabled');
-        if (sPre !== null) setPreAdhanEnabled(sPre === 'true');
-
-        const sMuadhin = localStorage.getItem('noor_muadhin_id');
-        if (sMuadhin && MUADHINS_LIST.some((m) => m.id === sMuadhin)) {
-          setMuadhinId(sMuadhin);
-        }
-
-        const sDhikrEnabled = localStorage.getItem('noor_dhikr_enabled');
-        if (sDhikrEnabled !== null) setDhikrEnabled(sDhikrEnabled === 'true');
-
-        const sInterval = Number(localStorage.getItem('noor_dhikr_interval'));
-        if (sInterval >= 1 && sInterval <= 5) setDhikrInterval(sInterval);
-
-        const sMode = localStorage.getItem('noor_dhikr_mode') as DhikrVoiceMode | null;
-        if (sMode === 'egyptian_dhikr' || sMode === 'sheikh') setDhikrMode(sMode);
-
-        setSelectedDhikrIds(parseSelectedDhikrIds(localStorage.getItem('noor_selected_dhikrs')));
-      } catch {
-        // ignore storage errors
-      }
-
-      if (typeof Notification === 'undefined') {
-        setNotifPermission('unsupported');
-      } else {
-        setNotifPermission(Notification.permission);
-      }
+      syncFromStorage();
     }, 0);
-    return () => clearTimeout(timer);
-  }, []);
+    const handler = () => syncFromStorage();
+    window.addEventListener('noor-settings-updated', handler);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('noor-settings-updated', handler);
+    };
+  }, [syncFromStorage]);
 
   const persistSetting = useCallback((key: string, value: string, label?: string) => {
     try {
@@ -132,6 +151,33 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
       setTimeout(() => setSettingsSavedNotice(null), 2200);
     }
   }, []);
+
+  const updateClipSchedule = useCallback(
+    (clipId: string, timing: DhikrScheduleTiming, customTime?: string, label?: string) => {
+      setDhikrSchedules((prev) => {
+        const current = prev[clipId] || { timing: 'periodic', customTime: '08:00' };
+        const next: DhikrScheduleMap = {
+          ...prev,
+          [clipId]: {
+            timing,
+            customTime: customTime || current.customTime || '08:00',
+          },
+        };
+        try {
+          localStorage.setItem('noor_dhikr_schedules', JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        window.dispatchEvent(new Event('noor-settings-updated'));
+        return next;
+      });
+      if (label) {
+        setSettingsSavedNotice(label);
+        setTimeout(() => setSettingsSavedNotice(null), 2200);
+      }
+    },
+    []
+  );
 
   const handleRequestPermission = async () => {
     if (typeof Notification === 'undefined') return;
@@ -476,7 +522,7 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
               type="button"
               onClick={() => {
                 setDhikrMode('egyptian_dhikr');
-                persistSetting('noor_dhikr_mode', 'egyptian_dhikr', 'تم اختيار الأذكار بالعامية المصرية');
+                persistSetting('noor_dhikr_mode', 'egyptian_dhikr', 'تم اختيار الأذكار');
               }}
               className={`min-h-[44px] rounded-xl px-2 py-2 text-[11px] sm:text-xs font-bold leading-tight text-center transition-colors ${
                 dhikrMode === 'egyptian_dhikr'
@@ -484,7 +530,7 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
                   : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
               }`}
             >
-              الأذكار بالعامية المصرية
+              الأذكار
             </button>
 
             <button
@@ -539,7 +585,7 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
             <span>تكرار الأذكار كل 5 دقائق</span>
           </button>
 
-          {/* Select Specific Dhikrs (Checkboxes) */}
+          {/* Select Specific Dhikrs (Checkboxes) + Per-Clip Schedule */}
           <div className="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-3">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
@@ -552,7 +598,7 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
                   persistSetting(
                     'noor_selected_dhikrs',
                     JSON.stringify(DEFAULT_SELECTED_DHIKR_IDS),
-                    'تم تفعيل جميع الأذكار الأربعة'
+                    'تم تفعيل جميع الأذكار'
                   );
                 }}
                 className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 transition-colors"
@@ -564,39 +610,55 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {EGYPTIAN_DHIKR_CLIPS.map((clip) => {
                 const isChecked = selectedDhikrIds.includes(clip.id);
+                const sched = dhikrSchedules[clip.id] || {
+                  timing: 'periodic' as DhikrScheduleTiming,
+                  customTime: '08:00',
+                };
                 return (
-                  <label
+                  <div
                     key={clip.id}
-                    className={`flex min-h-[44px] cursor-pointer items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition-colors ${
+                    className={`flex min-h-[44px] items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition-colors ${
                       isChecked
                         ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200'
                         : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/60 text-slate-600 dark:text-slate-400'
                     }`}
                   >
-                    <span className="flex items-center gap-2.5 min-w-0">
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => {
-                          if (isChecked && selectedDhikrIds.length <= 1) {
-                            setSettingsSavedNotice('يجب إبقاء ذكر واحد على الأقل مفعّلاً');
-                            setTimeout(() => setSettingsSavedNotice(null), 2200);
-                            return;
-                          }
-                          const next = isChecked
-                            ? selectedDhikrIds.filter((id) => id !== clip.id)
-                            : [...selectedDhikrIds, clip.id];
-                          setSelectedDhikrIds(next);
-                          persistSetting(
-                            'noor_selected_dhikrs',
-                            JSON.stringify(next),
-                            isChecked ? `تم إيقاف "${clip.label}"` : `تم تفعيل "${clip.label}"`
-                          );
-                        }}
-                        className="h-4 w-4 accent-emerald-600 rounded cursor-pointer shrink-0"
-                      />
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      aria-label={`تفعيل أو إيقاف ${clip.label}`}
+                      onChange={() => {
+                        if (isChecked && selectedDhikrIds.length <= 1) {
+                          setSettingsSavedNotice('يجب إبقاء ذكر واحد على الأقل مفعّلاً');
+                          setTimeout(() => setSettingsSavedNotice(null), 2200);
+                          return;
+                        }
+                        const next = isChecked
+                          ? selectedDhikrIds.filter((id) => id !== clip.id)
+                          : [...selectedDhikrIds, clip.id];
+                        setSelectedDhikrIds(next);
+                        persistSetting(
+                          'noor_selected_dhikrs',
+                          JSON.stringify(next),
+                          isChecked ? `تم إيقاف "${clip.label}"` : `تم تفعيل "${clip.label}"`
+                        );
+                      }}
+                      className="h-4 w-4 accent-emerald-600 rounded cursor-pointer shrink-0"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => setTimeModalClip(clip)}
+                      className="flex flex-1 min-w-0 items-center justify-between gap-2 text-right"
+                    >
                       <span className="truncate">{clip.label}</span>
-                    </span>
+                      {sched.timing === 'custom_time' && (
+                        <span className="shrink-0 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-extrabold text-amber-700 dark:text-amber-300 whitespace-nowrap">
+                          {formatTime24To12Ar(sched.customTime)}
+                        </span>
+                      )}
+                    </button>
+
                     <span
                       className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-extrabold ${
                         isChecked
@@ -606,7 +668,7 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
                     >
                       {isChecked ? 'مفعّل' : 'متوقف'}
                     </span>
-                  </label>
+                  </div>
                 );
               })}
             </div>
@@ -935,6 +997,28 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
           </div>
         )}
       </section>
+
+      <DhikrTimeModal
+        clip={timeModalClip}
+        initialTiming={
+          timeModalClip ? dhikrSchedules[timeModalClip.id]?.timing || 'periodic' : 'periodic'
+        }
+        initialTime={
+          timeModalClip ? dhikrSchedules[timeModalClip.id]?.customTime || '08:00' : '08:00'
+        }
+        onClose={() => setTimeModalClip(null)}
+        onSave={(clipId, timing, time24) => {
+          updateClipSchedule(
+            clipId,
+            timing,
+            time24,
+            timing === 'custom_time'
+              ? `تم ضبط وقت التشغيل الساعة ${formatTime24To12Ar(time24)}`
+              : 'تم حفظ توقيت تشغيل الذكر'
+          );
+          setTimeModalClip(null);
+        }}
+      />
     </div>
   );
 }

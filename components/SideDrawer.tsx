@@ -21,6 +21,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Smartphone,
 } from 'lucide-react';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 
@@ -337,26 +338,26 @@ export function SideDrawer({
             </button>
           </div>
 
-          {/* PWA Install Button */}
-          {!isInstalled && (isInstallable || isIOS) && (
-            <div className="border-t border-slate-200 dark:border-slate-800 pt-4">
+          {/* PWA Install / Phone Install Guide Button below الإعدادات */}
+          {!isInstalled && (
+            <div className="border-t border-slate-200 dark:border-slate-800 pt-3">
               {isInstallable ? (
                 <button
                   type="button"
                   onClick={install}
                   className="flex w-full min-h-[48px] items-center justify-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-500 px-4 py-3 text-sm font-extrabold text-white shadow-md transition-colors"
                 >
-                  <Download className="h-5 w-5" />
+                  <Download className="h-5 w-5 shrink-0" />
                   <span>تثبيت التطبيق على الهاتف (PWA)</span>
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={() => setShowIOSGuide(true)}
-                  className="flex w-full min-h-[48px] items-center justify-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm font-bold text-amber-700 dark:text-amber-300 transition-colors"
+                  className="flex w-full min-h-[48px] items-center justify-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 px-4 py-3 text-sm font-bold text-amber-700 dark:text-amber-300 transition-colors"
                 >
-                  <Share2 className="h-5 w-5" />
-                  <span>إضافة للشاشة الرئيسية (iPhone)</span>
+                  {isIOS ? <Share2 className="h-5 w-5 shrink-0" /> : <Smartphone className="h-5 w-5 shrink-0" />}
+                  <span>دليل التثبيت على الهاتف</span>
                 </button>
               )}
             </div>
@@ -381,11 +382,22 @@ export function SideDrawer({
       {showIOSGuide && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 space-y-3 text-slate-900 dark:text-white shadow-2xl">
-            <h3 className="text-base font-extrabold">التثبيت على iPhone و iPad</h3>
+            <h3 className="text-base font-extrabold">دليل التثبيت على الهاتف</h3>
             <p className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-              1. اضغط على زر <strong>المشاركة (Share)</strong> في شريط Safari بالأسفل.
-              <br />
-              2. مرر للأسفل واختر <strong>إضافة إلى الشاشة الرئيسية (Add to Home Screen)</strong>.
+              {isIOS ? (
+                <>
+                  1. اضغط على زر <strong>المشاركة (Share)</strong> في شريط Safari بالأسفل.
+                  <br />
+                  2. مرر للأسفل واختر <strong>إضافة إلى الشاشة الرئيسية (Add to Home Screen)</strong>.
+                </>
+              ) : (
+                <>
+                  لإضافة التطبيق كأيقونة على شاشة هاتفك والعمل بدون إنترنت:
+                  <br />
+                  افتح قائمة المتصفح (⋮) ثم اختر <strong>تثبيت التطبيق</strong> أو{' '}
+                  <strong>إضافة إلى الشاشة الرئيسية</strong>.
+                </>
+              )}
             </p>
             <button
               type="button"

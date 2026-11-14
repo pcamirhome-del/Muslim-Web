@@ -14,16 +14,22 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import {
+  DEFAULT_DHIKR_SCHEDULES,
   DEFAULT_SELECTED_DHIKR_IDS,
   DhikrAudioClip,
+  DhikrScheduleMap,
+  DhikrScheduleTiming,
   DhikrVoiceMode,
   EGYPTIAN_DHIKR_CLIPS,
   MUADHINS_LIST,
   MuadhinItem,
   SHEIKH_DHIKR_CLIPS,
+  formatTime24To12Ar,
   getSilentKeepAliveWavDataUri,
+  parseDhikrSchedules,
   parseSelectedDhikrIds,
 } from '@/lib/data/audio-library';
+import { DhikrTimeModal } from '@/components/DhikrTimeModal';
 import {
   ADHAN_PRAYER_KEYS,
   PRAYER_LABELS_AR,
@@ -57,6 +63,8 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
   const [dhikrIntervalMins, setDhikrIntervalMins] = useState<number>(3);
   const [dhikrMode, setDhikrMode] = useState<DhikrVoiceMode>('egyptian_dhikr');
   const [selectedDhikrIds, setSelectedDhikrIds] = useState<string[]>(DEFAULT_SELECTED_DHIKR_IDS);
+  const [dhikrSchedules, setDhikrSchedules] = useState<DhikrScheduleMap>(DEFAULT_DHIKR_SCHEDULES);
+  const [timeModalClip, setTimeModalClip] = useState<DhikrAudioClip | null>(null);
   const [dhikrSecondsLeft, setDhikrSecondsLeft] = useState<number>(180);
   const [playingDhikrClip, setPlayingDhikrClip] = useState<DhikrAudioClip | null>(null);
   const [audioNotice, setAudioNotice] = useState<string | null>(null);
@@ -68,6 +76,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
 
   const lastFiredAdhanKeyRef = useRef<string>('');
   const lastFiredPreAdhanKeyRef = useRef<string>('');
+  const firedScheduledDhikrSigsRef = useRef<Set<string>>(new Set());
   const dhikrIndexRef = useRef<number>(0);
   const nextDhikrAtMsRef = useRef<number>(0);
 
@@ -85,6 +94,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     dhikrIntervalMins,
     dhikrMode,
     selectedDhikrIds,
+    dhikrSchedules,
     selectedMuadhin,
   });
 
@@ -99,6 +109,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       dhikrIntervalMins,
       dhikrMode,
       selectedDhikrIds,
+      dhikrSchedules,
       selectedMuadhin,
     };
   }, [
@@ -111,6 +122,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     dhikrIntervalMins,
     dhikrMode,
     selectedDhikrIds,
+    dhikrSchedules,
     selectedMuadhin,
   ]);
 
@@ -147,6 +159,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         setDhikrMode(savedMode);
       }
       setSelectedDhikrIds(parseSelectedDhikrIds(localStorage.getItem('noor_selected_dhikrs')));
+      setDhikrSchedules(parseDhikrSchedules(localStorage.getItem('noor_dhikr_schedules')));
       const savedLastAdhan = localStorage.getItem('noor_last_adhan_sig');
       if (savedLastAdhan) {
         lastFiredAdhanKeyRef.current = savedLastAdhan;
@@ -209,10 +222,20 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
   // Start or stop Silent Audio Loop Workaround to prevent iOS/Android background throttling
   const ensureSilentKeepAliveLoop = useCallback(() => {
     if (typeof window === 'undefined') return;
+    const hasScheduledDhikr =
+      liveStateRef.current.selectedDhikrIds.some((id) => {
+        const sched = liveStateRef.current.dhikrSchedules[id];
+        return sched && sched.timing !== 'periodic';
+      }) ||
+      SHEIKH_DHIKR_CLIPS.some((c) => {
+        const sched = liveStateRef.current.dhikrSchedules[c.id];
+        return sched && sched.timing !== 'periodic';
+      });
     const shouldKeepAlive =
       liveStateRef.current.adhanEnabled ||
       liveStateRef.current.preAdhanEnabled ||
-      liveStateRef.current.dhikrEnabled;
+      liveStateRef.current.dhikrEnabled ||
+      hasScheduledDhikr;
 
     if (!shouldKeepAlive) {
       if (silentKeepAliveAudioRef.current) {
@@ -360,19 +383,34 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
   }, [refreshKeepAliveMediaSession]);
 
   const playNextDhikrClip = useCallback(
-    (specificClip?: DhikrAudioClip) => {
-      stopDhikrAudio();
-      setAudioNotice(null);
-      ensureSilentKeepAliveLoop();
-
+    (specificClip?: DhikrAudioClip, fromPeriodicTimer = false) => {
       const currentMode = liveStateRef.current.dhikrMode;
       const basePool = currentMode === 'egyptian_dhikr' ? EGYPTIAN_DHIKR_CLIPS : SHEIKH_DHIKR_CLIPS;
       const selectedIds = liveStateRef.current.selectedDhikrIds;
-      const filteredPool =
+      const schedules = liveStateRef.current.dhikrSchedules;
+
+      const selectedPool =
         currentMode === 'egyptian_dhikr'
           ? basePool.filter((c) => selectedIds.includes(c.id))
           : basePool;
-      const pool = filteredPool.length > 0 ? filteredPool : basePool;
+      const periodicPool = selectedPool.filter(
+        (c) => (schedules[c.id]?.timing || 'periodic') === 'periodic'
+      );
+
+      if (!specificClip && fromPeriodicTimer && periodicPool.length === 0) {
+        return;
+      }
+
+      const pool =
+        periodicPool.length > 0
+          ? periodicPool
+          : selectedPool.length > 0
+            ? selectedPool
+            : basePool;
+
+      stopDhikrAudio();
+      setAudioNotice(null);
+      ensureSilentKeepAliveLoop();
 
       const clip = specificClip || pool[dhikrIndexRef.current % pool.length];
       if (!specificClip) {
@@ -473,21 +511,20 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     (nowMs: number) => {
       const st = liveStateRef.current;
       const now = new Date(nowMs);
+      const clock = getZonedClockParts(now, st.timezone);
+      const hhmm = `${String(clock.hours24).padStart(2, '0')}:${String(clock.minutes).padStart(2, '0')}`;
+      let datePrefix = now.toISOString().slice(0, 10);
+      try {
+        datePrefix = new Intl.DateTimeFormat('en-CA', {
+          timeZone: st.timezone || 'Africa/Cairo',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(now);
+      } catch {}
 
       // 1. Check Adhan & 10-Minute Pre-Adhan
       if (st.timings && (st.adhanEnabled || st.adhanNotifEnabled || st.preAdhanEnabled)) {
-        const clock = getZonedClockParts(now, st.timezone);
-        const hhmm = `${String(clock.hours24).padStart(2, '0')}:${String(clock.minutes).padStart(2, '0')}`;
-        let datePrefix = now.toISOString().slice(0, 10);
-        try {
-          datePrefix = new Intl.DateTimeFormat('en-CA', {
-            timeZone: st.timezone || 'Africa/Cairo',
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-          }).format(now);
-        } catch {}
-
         for (const key of ADHAN_PRAYER_KEYS) {
           const target = cleanTimeString(st.timings[key]);
           if (!target) continue;
@@ -507,7 +544,48 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         }
       }
 
-      // 2. Check Periodic Dhikr via exact wall-clock timestamp
+      // 2. Check Scheduled Dhikr Clips (before_prayer, after_prayer, custom_time)
+      const isAdhanPlayingNow = Boolean(adhanAudioRef.current && !adhanAudioRef.current.paused);
+      if (!isAdhanPlayingNow) {
+        const allDhikrClips = [...EGYPTIAN_DHIKR_CLIPS, ...SHEIKH_DHIKR_CLIPS];
+        for (const clip of allDhikrClips) {
+          const isEgyptian = EGYPTIAN_DHIKR_CLIPS.some((c) => c.id === clip.id);
+          if (isEgyptian && !st.selectedDhikrIds.includes(clip.id)) continue;
+          const sched = st.dhikrSchedules[clip.id];
+          if (!sched || sched.timing === 'periodic') continue;
+
+          let matchedSig: string | null = null;
+          if (sched.timing === 'custom_time' && sched.customTime === hhmm) {
+            matchedSig = `${datePrefix}-dhikr-custom-${clip.id}-${hhmm}`;
+          } else if (st.timings && (sched.timing === 'before_prayer' || sched.timing === 'after_prayer')) {
+            const offset = sched.timing === 'before_prayer' ? -10 : 10;
+            for (const key of ADHAN_PRAYER_KEYS) {
+              const target = cleanTimeString(st.timings[key]);
+              if (target && addMinutesToTime24(target, offset) === hhmm) {
+                matchedSig = `${datePrefix}-dhikr-${sched.timing}-${key}-${clip.id}-${hhmm}`;
+                break;
+              }
+            }
+          }
+
+          if (matchedSig && !firedScheduledDhikrSigsRef.current.has(matchedSig)) {
+            if (firedScheduledDhikrSigsRef.current.size > 100) {
+              firedScheduledDhikrSigsRef.current.clear();
+            }
+            firedScheduledDhikrSigsRef.current.add(matchedSig);
+            playNextDhikrClip(clip);
+            sendPrayerNotification(
+              `تذكير: ${clip.label}`,
+              clip.egyptianPrompt,
+              `dhikr-${clip.id}`,
+              matchedSig
+            );
+            break;
+          }
+        }
+      }
+
+      // 3. Check Periodic Dhikr via exact wall-clock timestamp
       if (st.dhikrEnabled) {
         const intervalMs = Math.max(1, st.dhikrIntervalMins) * 60 * 1000;
         if (!nextDhikrAtMsRef.current || nextDhikrAtMsRef.current < nowMs - intervalMs * 2) {
@@ -515,13 +593,13 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         }
         if (nowMs >= nextDhikrAtMsRef.current) {
           nextDhikrAtMsRef.current = nowMs + intervalMs;
-          playNextDhikrClip();
+          playNextDhikrClip(undefined, true);
         }
         const secsLeft = Math.max(1, Math.ceil((nextDhikrAtMsRef.current - nowMs) / 1000));
         setDhikrSecondsLeft(secsLeft);
       }
     },
-    [playNextDhikrClip, triggerAdhanForPrayer, triggerPreAdhanForPrayer]
+    [playNextDhikrClip, sendPrayerNotification, triggerAdhanForPrayer, triggerPreAdhanForPrayer]
   );
 
   // Initialize Background Web Worker, Service Worker listener, Silent Audio Keep-Alive & MediaSession handlers
@@ -544,7 +622,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           if (typeof data.nextDhikrAtMs === 'number') {
             nextDhikrAtMsRef.current = data.nextDhikrAtMs;
           }
-          playNextDhikrClip();
+          playNextDhikrClip(undefined, true);
         } else if (data.type === 'TICK') {
           evaluateWallClock(typeof data.nowMs === 'number' ? data.nowMs : Date.now());
         }
@@ -699,6 +777,10 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
   ]);
 
   useEffect(() => {
+    ensureSilentKeepAliveLoop();
+  }, [selectedDhikrIds, dhikrSchedules, ensureSilentKeepAliveLoop]);
+
+  useEffect(() => {
     return () => {
       stopAdhanAudio();
       stopDhikrAudio();
@@ -719,6 +801,27 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     const s = secs % 60;
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
+
+  const updateClipSchedule = useCallback(
+    (clipId: string, timing: DhikrScheduleTiming, customTime?: string) => {
+      setDhikrSchedules((prev) => {
+        const current = prev[clipId] || { timing: 'periodic', customTime: '08:00' };
+        const next: DhikrScheduleMap = {
+          ...prev,
+          [clipId]: {
+            timing,
+            customTime: customTime || current.customTime || '08:00',
+          },
+        };
+        try {
+          localStorage.setItem('noor_dhikr_schedules', JSON.stringify(next));
+        } catch {}
+        window.dispatchEvent(new Event('noor-settings-updated'));
+        return next;
+      });
+    },
+    []
+  );
 
   const activePool = dhikrMode === 'egyptian_dhikr' ? EGYPTIAN_DHIKR_CLIPS : SHEIKH_DHIKR_CLIPS;
 
@@ -986,7 +1089,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
                 : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
             }`}
           >
-            الأذكار بالعامية المصرية المسموعة
+            الأذكار
           </button>
 
           <button
@@ -1078,12 +1181,16 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           </div>
         </div>
 
-        {/* Active / Clickable Clips Preview List with Selection Checkboxes */}
+        {/* Active / Clickable Clips Preview List: single row per clip (Title + optional Custom Time + Play) */}
         <div className="space-y-1.5 pt-1">
           {activePool.map((clip) => {
             const isPlaying = playingDhikrClip?.id === clip.id;
             const isSelected =
               dhikrMode !== 'egyptian_dhikr' || selectedDhikrIds.includes(clip.id);
+            const sched = dhikrSchedules[clip.id] || {
+              timing: 'periodic' as DhikrScheduleTiming,
+              customTime: '08:00',
+            };
             return (
               <div
                 key={clip.id}
@@ -1121,28 +1228,30 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
 
                 <button
                   type="button"
-                  onClick={() => (isPlaying ? stopDhikrAudio() : playNextDhikrClip(clip))}
+                  onClick={() => setTimeModalClip(clip)}
                   className="flex flex-1 min-w-0 items-center justify-between gap-2 text-right"
                 >
-                  <span className="block min-w-0 flex-1">
-                    <span className="block text-xs font-bold truncate">{clip.label}</span>
-                    {clip.egyptianPrompt !== clip.label && (
-                      <span className="block text-[11px] text-slate-600 dark:text-slate-300 truncate">
-                        {clip.egyptianPrompt}
-                      </span>
-                    )}
-                  </span>
-                  <span
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white ${
-                      isPlaying ? 'bg-rose-600' : 'bg-emerald-700'
-                    }`}
-                  >
-                    {isPlaying ? (
-                      <Square className="h-3.5 w-3.5 fill-current" />
-                    ) : (
-                      <Play className="h-3.5 w-3.5 fill-current" />
-                    )}
-                  </span>
+                  <span className="text-xs font-bold truncate">{clip.label}</span>
+                  {sched.timing === 'custom_time' && (
+                    <span className="shrink-0 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-extrabold text-amber-700 dark:text-amber-300 whitespace-nowrap">
+                      {formatTime24To12Ar(sched.customTime)}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => (isPlaying ? stopDhikrAudio() : playNextDhikrClip(clip))}
+                  aria-label={isPlaying ? `إيقاف ${clip.label}` : `تشغيل ${clip.label}`}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white transition-colors ${
+                    isPlaying ? 'bg-rose-600' : 'bg-emerald-700 hover:bg-emerald-600'
+                  }`}
+                >
+                  {isPlaying ? (
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                  ) : (
+                    <Play className="h-3.5 w-3.5 fill-current" />
+                  )}
                 </button>
               </div>
             );
@@ -1153,6 +1262,21 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">{audioNotice}</p>
         )}
       </section>
+
+      <DhikrTimeModal
+        clip={timeModalClip}
+        initialTiming={
+          timeModalClip ? dhikrSchedules[timeModalClip.id]?.timing || 'periodic' : 'periodic'
+        }
+        initialTime={
+          timeModalClip ? dhikrSchedules[timeModalClip.id]?.customTime || '08:00' : '08:00'
+        }
+        onClose={() => setTimeModalClip(null)}
+        onSave={(clipId, timing, time24) => {
+          updateClipSchedule(clipId, timing, time24);
+          setTimeModalClip(null);
+        }}
+      />
     </div>
   );
 }

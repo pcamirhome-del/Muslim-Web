@@ -80,13 +80,33 @@ export function LiveRadioPlayer({
 }: LiveRadioPlayerProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [category, setCategory] = useState<RadioCategory>('all');
+  const [sleepSelectVal, setSleepSelectVal] = useState<string>('');
+  const [showCustomSleepInput, setShowCustomSleepInput] = useState<boolean>(false);
   const [customMinutes, setCustomMinutes] = useState<string>('20');
 
   const isPlayingOrConnecting =
     status === 'playing' || status === 'connecting' || status === 'reconnecting';
 
   const cairoRadio = PRIORITY_RADIO_STATIONS[0];
-  const topFiveSheikhs = PRIORITY_RADIO_STATIONS.slice(1, 6);
+  const quickSelectStations = useMemo(
+    () => [
+      { id: 70, label: 'المنشاوي', station: PRIORITY_RADIO_STATIONS.find((s) => s.id === 70) },
+      { id: 75, label: 'الحصري', station: PRIORITY_RADIO_STATIONS.find((s) => s.id === 75) },
+      { id: 30, label: 'عبد الباسط', station: PRIORITY_RADIO_STATIONS.find((s) => s.id === 30) },
+      { id: 64, label: 'الطبلاوي', station: PRIORITY_RADIO_STATIONS.find((s) => s.id === 64) },
+      {
+        id: 33,
+        label: 'الشيخ عبد الرحمن السديس',
+        station: PRIORITY_RADIO_STATIONS.find((s) => s.id === 33),
+      },
+      {
+        id: 9001,
+        label: 'إذاعة التلاوات الخاشعة',
+        station: PRIORITY_RADIO_STATIONS.find((s) => s.id === 9001),
+      },
+    ],
+    []
+  );
 
   const filteredStations = useMemo(() => {
     const q = searchQuery.trim();
@@ -249,7 +269,7 @@ export function LiveRadioPlayer({
           <div className="border-t border-white/10 pt-3 space-y-2">
             <div className="flex items-center justify-between gap-2 text-xs">
               <span className="flex items-center gap-1.5 font-bold text-amber-300">
-                <Timer className="h-4 w-4" />
+                <Timer className="h-4 w-4 shrink-0" />
                 <span>مؤقت النوم وإيقاف البث التلقائي</span>
               </span>
               {sleepTimerSecondsLeft !== null ? (
@@ -261,60 +281,79 @@ export function LiveRadioPlayer({
               )}
             </div>
 
-            {/* Row 1: 4 Sleep Timer Preset Buttons (Strict max 4 per row) */}
-            <div className="grid grid-cols-4 gap-1.5">
-              {[5, 15, 30, 45].map((mins) => (
-                <button
-                  key={mins}
-                  type="button"
-                  onClick={() => onSetSleepTimer(mins)}
-                  className="min-h-[40px] rounded-xl border border-white/15 bg-white/10 hover:bg-amber-600/80 px-1 py-1.5 text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors"
-                >
-                  {mins} دقيقة
-                </button>
-              ))}
-            </div>
+            <select
+              value={sleepSelectVal}
+              aria-label="مؤقت النوم وإيقاف البث التلقائي"
+              onChange={(e) => {
+                const val = e.target.value;
+                setSleepSelectVal(val);
+                const mins = Number.parseInt(val, 10);
+                if (!Number.isNaN(mins) && mins > 0) {
+                  setShowCustomSleepInput(false);
+                  onSetSleepTimer(mins);
+                }
+              }}
+              className="min-h-[42px] w-full rounded-xl border border-white/20 bg-slate-900/95 px-3 py-2 text-xs sm:text-sm font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              <option value="">اختر مدة الإيقاف التلقائي...</option>
+              <option value="5">5 دقائق</option>
+              <option value="15">15 دقيقة</option>
+              <option value="30">30 دقيقة</option>
+              <option value="45">45 دقيقة</option>
+              <option value="60">60 دقيقة</option>
+            </select>
 
-            {/* Row 2: 60 min + custom minutes + Apply/Cancel */}
-            <div className="grid grid-cols-4 gap-1.5 items-center">
+            <div className="grid grid-cols-2 gap-1.5">
               <button
                 type="button"
-                onClick={() => onSetSleepTimer(60)}
-                className="min-h-[40px] rounded-xl border border-white/15 bg-white/10 hover:bg-amber-600/80 px-1 py-1.5 text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors"
+                onClick={() => setShowCustomSleepInput((v) => !v)}
+                className="min-h-[40px] rounded-xl bg-emerald-700 hover:bg-emerald-600 px-2 py-1.5 text-xs font-bold text-white transition-colors"
               >
-                60 دقيقة
+                تحديد مخصص
               </button>
-
-              <input
-                type="number"
-                min={1}
-                max={360}
-                value={customMinutes}
-                onChange={(e) => setCustomMinutes(e.target.value)}
-                aria-label="دقائق مخصصة لمؤقت النوم"
-                className="min-h-[40px] w-full rounded-xl border border-white/20 bg-slate-900/90 px-2 text-center font-mono-num text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
 
               <button
                 type="button"
                 onClick={() => {
-                  const n = Number.parseInt(customMinutes, 10);
-                  if (!Number.isNaN(n) && n > 0) onSetSleepTimer(n);
+                  setSleepSelectVal('');
+                  setShowCustomSleepInput(false);
+                  onCancelSleepTimer();
                 }}
-                className="min-h-[40px] rounded-xl bg-emerald-700 hover:bg-emerald-600 px-1 py-1.5 text-[10px] sm:text-xs font-bold leading-tight text-center text-white transition-colors"
-              >
-                تفعيل مخصص
-              </button>
-
-              <button
-                type="button"
-                onClick={onCancelSleepTimer}
                 disabled={sleepTimerSecondsLeft === null}
-                className="min-h-[40px] rounded-xl bg-rose-600/80 hover:bg-rose-600 px-1 py-1.5 text-[10px] sm:text-xs font-bold leading-tight text-center text-white transition-colors disabled:opacity-40"
+                className="min-h-[40px] rounded-xl bg-rose-600/85 hover:bg-rose-600 px-2 py-1.5 text-xs font-bold text-white transition-colors disabled:opacity-40"
               >
-                إلغاء المؤقت
+                إنهاء المؤقت
               </button>
             </div>
+
+            {showCustomSleepInput && (
+              <div className="grid grid-cols-2 gap-1.5 items-center pt-1">
+                <input
+                  type="number"
+                  min={1}
+                  max={360}
+                  value={customMinutes}
+                  onChange={(e) => setCustomMinutes(e.target.value)}
+                  aria-label="دقائق مخصصة لمؤقت النوم"
+                  placeholder="عدد الدقائق"
+                  className="min-h-[40px] w-full rounded-xl border border-white/20 bg-slate-900/90 px-3 text-center font-mono-num text-xs font-bold text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const n = Number.parseInt(customMinutes, 10);
+                    if (!Number.isNaN(n) && n > 0) {
+                      setSleepSelectVal('');
+                      onSetSleepTimer(n);
+                      setShowCustomSleepInput(false);
+                    }
+                  }}
+                  className="min-h-[40px] rounded-xl bg-amber-600 hover:bg-amber-500 px-2 py-1.5 text-xs font-bold text-white transition-colors"
+                >
+                  تفعيل المؤقت
+                </button>
+              </div>
+            )}
           </div>
 
           {errorMsg && (
@@ -367,92 +406,42 @@ export function LiveRadioPlayer({
           </span>
         </button>
 
-        {/* Top 5 Featured Readers (Max 4 buttons per row) */}
-        <div className="grid grid-cols-4 gap-1.5">
-          {topFiveSheikhs.slice(0, 4).map((station) => {
-            const isActive = activeStation?.id === station.id;
-            const shortNames: Record<number, string> = {
-              70: 'المنشاوي',
-              75: 'الحصري',
-              30: 'عبد الباسط',
-              64: 'الطبلاوي',
-            };
-            return (
-              <button
-                key={station.id}
-                type="button"
-                onClick={() => (isActive ? onTogglePlayPause() : onStartStream(station))}
-                className={`min-h-[48px] rounded-xl px-1 py-2 text-[10px] sm:text-xs font-bold leading-tight text-center break-words transition-colors ${
-                  isActive
-                    ? 'bg-emerald-700 text-white shadow-sm'
-                    : 'bg-slate-100 dark:bg-slate-800/90 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 hover:border-amber-500/50'
-                }`}
-              >
-                {shortNames[station.id] || station.name}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="grid grid-cols-2 gap-1.5">
-          {topFiveSheikhs.slice(4, 5).map((station) => {
-            const isActive = activeStation?.id === station.id;
-            return (
-              <button
-                key={station.id}
-                type="button"
-                onClick={() => (isActive ? onTogglePlayPause() : onStartStream(station))}
-                className={`min-h-[44px] rounded-xl px-2 py-2 text-xs font-bold text-center transition-colors ${
-                  isActive
-                    ? 'bg-emerald-700 text-white shadow-sm'
-                    : 'bg-slate-100 dark:bg-slate-800/90 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 hover:border-amber-500/50'
-                }`}
-              >
-                الشيخ عبد الرحمن السديس
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => {
-              const general = PRIORITY_RADIO_STATIONS[6];
-              if (activeStation?.id === general.id) onTogglePlayPause();
-              else onStartStream(general);
+        {/* Quick-Select Readers & Category Filter Dropdowns (Mobile & Desktop, Max 2 per row) */}
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <select
+            value={
+              activeStation && quickSelectStations.some((q) => q.id === activeStation.id)
+                ? String(activeStation.id)
+                : ''
+            }
+            onChange={(e) => {
+              const id = Number(e.target.value);
+              const found = quickSelectStations.find((q) => q.id === id)?.station;
+              if (found) onStartStream(found);
             }}
-            className={`min-h-[44px] rounded-xl px-2 py-2 text-xs font-bold text-center transition-colors ${
-              activeStation?.id === 9001
-                ? 'bg-emerald-700 text-white shadow-sm'
-                : 'bg-slate-100 dark:bg-slate-800/90 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 hover:border-amber-500/50'
-            }`}
+            aria-label="الاختيار السريع لكبار القراء والإذاعات"
+            className="min-h-[44px] w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-2 text-xs sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
           >
-            إذاعة التلاوات الخاشعة
-          </button>
-        </div>
-      </div>
+            <option value="">الاختيار السريع (كبار القراء)</option>
+            {quickSelectStations.map((item) => (
+              <option key={item.id} value={String(item.id)}>
+                {item.label}
+              </option>
+            ))}
+          </select>
 
-      {/* Category Filter Row (Strict 4 buttons per row) */}
-      <div className="grid grid-cols-4 gap-1.5">
-        {(
-          [
-            { id: 'all', label: 'كل القنوات' },
-            { id: 'official', label: 'إذاعات رسمية' },
-            { id: 'senior_egypt', label: 'قراء مصر' },
-            { id: 'haramain', label: 'قراء الحرمين' },
-          ] as const
-        ).map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setCategory(tab.id)}
-            className={`min-h-[42px] rounded-xl px-1 py-1.5 text-[10px] sm:text-xs font-bold leading-tight text-center break-words transition-colors ${
-              category === tab.id
-                ? 'bg-amber-600 text-white shadow-sm'
-                : 'border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800/80'
-            }`}
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value as RadioCategory)}
+            aria-label="تصنيف قنوات الإذاعة"
+            className="min-h-[44px] w-full rounded-xl border border-amber-500/35 bg-white dark:bg-slate-900 px-2.5 py-2 text-xs sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
           >
-            {tab.label}
-          </button>
-        ))}
+            <option value="all">كل القنوات</option>
+            <option value="official">إذاعات رسمية</option>
+            <option value="senior_egypt">قراء مصر</option>
+            <option value="haramain">قراء الحرمين</option>
+          </select>
+        </div>
       </div>
 
       {/* Fast Station Search */}

@@ -1,9 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Clock, Smartphone, Download, Share2, MapPin } from 'lucide-react';
+import { Clock, MapPin } from 'lucide-react';
 import { NextPrayerInfo, UserLocation, getTimezoneSeasonInfo } from '@/lib/prayer-utils';
-import { usePWAInstall } from '@/hooks/usePWAInstall';
 
 interface PhonePrayerWidgetProps {
   nextPrayer: NextPrayerInfo | null;
@@ -16,8 +15,6 @@ export function PhonePrayerWidget({
   location,
   timezone,
 }: PhonePrayerWidgetProps) {
-  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
-  const [showWidgetHelp, setShowWidgetHelp] = useState(false);
   const [seasonInfo, setSeasonInfo] = useState<ReturnType<typeof getTimezoneSeasonInfo> | null>(
     null
   );
@@ -50,71 +47,34 @@ export function PhonePrayerWidget({
             </>
           )}
         </div>
-
-        {!isInstalled && (
-          <button
-            type="button"
-            onClick={() => {
-              if (isInstallable) {
-                install();
-              } else {
-                setShowWidgetHelp((v) => !v);
-              }
-            }}
-            className="min-h-[36px] inline-flex items-center gap-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 px-2.5 py-1 text-[11px] font-bold text-amber-200 transition-colors"
-          >
-            {isInstallable ? (
-              <>
-                <Download className="h-3.5 w-3.5" />
-                <span>تثبيت الويدجت والتطبيق</span>
-              </>
-            ) : isIOS ? (
-              <>
-                <Share2 className="h-3.5 w-3.5" />
-                <span>إضافة للشاشة الرئيسية</span>
-              </>
-            ) : (
-              <>
-                <Smartphone className="h-3.5 w-3.5" />
-                <span>دليل التثبيت على الهاتف</span>
-              </>
-            )}
-          </button>
-        )}
       </div>
 
-      {/* Main Countdown Focal Anchor */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
-        <div className="space-y-0.5">
-          <p className="text-xs text-emerald-300 font-semibold flex items-center gap-1.5">
-            <Clock className="h-3.5 w-3.5" />
+      {/* Main Countdown Focal Anchor: single row on mobile & desktop */}
+      <div className="flex flex-row items-center justify-between gap-2.5 pt-1">
+        <div className="min-w-0 space-y-0.5">
+          <p className="text-[11px] sm:text-xs text-emerald-300 font-semibold flex items-center gap-1">
+            <Clock className="h-3.5 w-3.5 shrink-0" />
             <span>الصلاة القادمة</span>
           </p>
-          <div className="flex items-baseline gap-2.5">
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-white">
+          <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2.5">
+            <h2 className="text-xl sm:text-3xl font-extrabold text-white leading-tight">
               {nextPrayer ? nextPrayer.nameAr : '—'}
             </h2>
-            <span className="font-mono-num text-base sm:text-lg font-bold text-amber-300">
+            <span className="font-mono-num text-xs sm:text-lg font-bold text-amber-300 whitespace-nowrap">
               {nextPrayer ? nextPrayer.time12Ar : '--:--'}
             </span>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-center sm:text-left">
-          <p className="text-[11px] text-slate-300 font-semibold">الوقت المتبقي للأذان</p>
-          <p className="font-mono-num text-2xl sm:text-3xl font-extrabold tracking-wider text-amber-400 mt-0.5">
+        <div className="shrink-0 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 sm:px-4 sm:py-2.5 text-center sm:text-left">
+          <p className="text-[10px] sm:text-[11px] text-slate-300 font-semibold whitespace-nowrap">
+            الوقت المتبقي للأذان
+          </p>
+          <p className="font-mono-num text-lg sm:text-3xl font-extrabold tracking-wider text-amber-400 mt-0.5 whitespace-nowrap">
             {nextPrayer ? nextPrayer.formattedCountdown : '00:00:00'}
           </p>
         </div>
       </div>
-
-      {showWidgetHelp && (
-        <div className="rounded-2xl border border-amber-400/30 bg-black/35 p-3 text-xs leading-relaxed text-slate-200">
-          {isIOS
-            ? 'لإضافة التطبيق واختصارات المواقيت على شاشة الآيفون: اضغط زر المشاركة (Share) في Safari ثم اختر "إضافة إلى الشاشة الرئيسية".'
-            : 'لإضافة التطبيق كأيقونة واختصارات سريعة على هاتفك: افتح قائمة المتصفح (⋮) واختر "تثبيت التطبيق" أو "إضافة إلى الشاشة الرئيسية".'}
-        </div>
-      )}
     </section>
   );
 }

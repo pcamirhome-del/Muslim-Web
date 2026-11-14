@@ -256,7 +256,7 @@ export function PrayerTimesSection({
           {error}
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        <div className="grid grid-cols-3 lg:grid-cols-6 gap-1.5 sm:gap-2">
           {ORDERED_PRAYERS.map((key) => {
             const isNext = nextPrayerKey === key;
             const rawTime = schedule?.timings[key] || '--:--';
@@ -264,14 +264,14 @@ export function PrayerTimesSection({
             return (
               <div
                 key={key}
-                className={`rounded-2xl border p-3 text-center transition-colors ${
+                className={`rounded-2xl border p-2 sm:p-3 text-center transition-colors ${
                   isNext
                     ? 'border-amber-500 bg-amber-500/15 shadow-md'
                     : 'border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/75'
                 }`}
               >
                 <p
-                  className={`text-xs font-bold ${
+                  className={`text-[11px] sm:text-xs font-bold ${
                     isNext
                       ? 'text-amber-700 dark:text-amber-300'
                       : 'text-slate-600 dark:text-slate-300'
@@ -280,7 +280,7 @@ export function PrayerTimesSection({
                   {PRAYER_LABELS_AR[key]}
                 </p>
                 <p
-                  className={`font-mono-num text-base sm:text-lg font-extrabold mt-1 ${
+                  className={`font-mono-num text-sm sm:text-lg font-extrabold mt-1 whitespace-nowrap ${
                     isNext ? 'text-slate-900 dark:text-white' : ''
                   }`}
                 >
