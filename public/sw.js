@@ -39,7 +39,11 @@ let swPrayerState = {
   adhanEnabled: true,
   adhanNotifEnabled: true,
   preAdhanEnabled: true,
+  selectedDhikrIds: [],
+  dhikrSchedules: {},
+  dhikrClipsMeta: [],
 };
+const swFiredDhikrSigs = new Set();
 let swCheckTimer = null;
 
 function cleanTime(raw) {
@@ -97,72 +101,122 @@ async function notifyClients(message) {
   }
 }
 
+async function closeNotificationsByTag(tag) {
+  if (!tag || !self.registration || !self.registration.getNotifications) return;
+  try {
+    const list = await self.registration.getNotifications({ tag });
+    for (const n of list) {
+      n.close();
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function checkServiceWorkerPrayerSchedule() {
-  if (!swPrayerState.timings) return;
   const now = new Date();
   const { hhmm, dateKey } = getZonedHHMMAndDate(now, swPrayerState.timezone);
 
-  for (const key of ADHAN_KEYS) {
-    const target = cleanTime(swPrayerState.timings[key]);
-    if (!target) continue;
+  // 1. Check Adhan & Pre-Adhan
+  if (swPrayerState.timings) {
+    for (const key of ADHAN_KEYS) {
+      const target = cleanTime(swPrayerState.timings[key]);
+      if (!target) continue;
 
-    if ((swPrayerState.adhanEnabled || swPrayerState.adhanNotifEnabled) && target === hhmm) {
-      const sig = dateKey + '-' + key + '-' + hhmm;
-      if (!swFiredAdhanSigs.has(sig)) {
-        swFiredAdhanSigs.add(sig);
-        if (swPrayerState.adhanNotifEnabled && self.registration && self.registration.showNotification) {
-          self.registration
-            .showNotification('حان الآن موعد أذان ' + (PRAYER_NAMES_AR[key] || key), {
-              body: 'يرفع الأذان بصوت ' + (swPrayerState.muadhinName || 'المؤذن المختار'),
-              icon: '/pwa-192x192.png',
-              badge: '/pwa-192x192.png',
-              tag: 'adhan-' + key,
-              renotify: true,
-              requireInteraction: true,
-              vibrate: [300, 120, 300, 120, 400],
-              actions: [
-                { action: 'stop_adhan', title: 'إيقاف الأذان' },
-                { action: 'mute_adhan', title: 'صامت' },
-              ],
-            })
-            .catch(() => {});
-        }
-        notifyClients({
-          type: 'SW_ADHAN_DUE',
-          prayerKey: key,
-          hhmm,
-          signature: sig,
-        });
-      }
-    }
-
-    if (swPrayerState.preAdhanEnabled) {
-      const preTarget = addMinutesToTime24(target, -10);
-      if (preTarget === hhmm) {
-        const preSig = dateKey + '-pre-' + key + '-' + hhmm;
-        if (!swFiredPreAdhanSigs.has(preSig)) {
-          swFiredPreAdhanSigs.add(preSig);
-          if (self.registration && self.registration.showNotification) {
+      if ((swPrayerState.adhanEnabled || swPrayerState.adhanNotifEnabled) && target === hhmm) {
+        const sig = dateKey + '-' + key + '-' + hhmm;
+        if (!swFiredAdhanSigs.has(sig)) {
+          swFiredAdhanSigs.add(sig);
+          if (swPrayerState.adhanNotifEnabled && self.registration && self.registration.showNotification) {
             self.registration
-              .showNotification('اقترب موعد صلاة ' + (PRAYER_NAMES_AR[key] || key), {
-                body: 'تبقى ١٠ دقائق على دخول وقت الصلاة — تهيأ للوضوء والذكر',
+              .showNotification('حان الآن موعد أذان ' + (PRAYER_NAMES_AR[key] || key), {
+                body: 'يرفع الأذان بصوت ' + (swPrayerState.muadhinName || 'المؤذن المختار'),
                 icon: '/pwa-192x192.png',
                 badge: '/pwa-192x192.png',
-                tag: 'pre-adhan-' + key,
+                tag: 'adhan-' + key,
                 renotify: true,
                 requireInteraction: true,
-                vibrate: [250, 100, 250],
+                vibrate: [300, 120, 300, 120, 400],
+                actions: [
+                  { action: 'stop_adhan', title: 'إيقاف الأذان' },
+                  { action: 'mute_adhan', title: 'صامت' },
+                ],
               })
               .catch(() => {});
           }
           notifyClients({
-            type: 'SW_PRE_ADHAN_DUE',
+            type: 'SW_ADHAN_DUE',
             prayerKey: key,
             hhmm,
-            signature: preSig,
+            signature: sig,
           });
         }
       }
+
+      if (swPrayerState.preAdhanEnabled) {
+        const preTarget = addMinutesToTime24(target, -10);
+        if (preTarget === hhmm) {
+          const preSig = dateKey + '-pre-' + key + '-' + hhmm;
+          if (!swFiredPreAdhanSigs.has(preSig)) {
+            swFiredPreAdhanSigs.add(preSig);
+            if (self.registration && self.registration.showNotification) {
+              self.registration
+                .showNotification('اقترب موعد صلاة ' + (PRAYER_NAMES_AR[key] || key), {
+                  body: 'تبقى ١٠ دقائق على دخول وقت الصلاة — تهيأ للوضوء والذكر',
+                  icon: '/pwa-192x192.png',
+                  badge: '/pwa-192x192.png',
+                  tag: 'pre-adhan-' + key,
+                  renotify: true,
+                  requireInteraction: true,
+                  vibrate: [250, 100, 250],
+                })
+                .catch(() => {});
+            }
+            notifyClients({
+              type: 'SW_PRE_ADHAN_DUE',
+              prayerKey: key,
+              hhmm,
+              signature: preSig,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Check Scheduled Dhikr & Sheikh Clips (custom_time, before_prayer, after_prayer)
+  const clipsMeta = Array.isArray(swPrayerState.dhikrClipsMeta) ? swPrayerState.dhikrClipsMeta : [];
+  const schedules = swPrayerState.dhikrSchedules || {};
+  for (const clip of clipsMeta) {
+    if (!clip || !clip.id) continue;
+    const sched = schedules[clip.id];
+    if (!sched || sched.timing === 'periodic' || sched.timing === 'off') continue;
+
+    let matchedSig = null;
+    if (sched.timing === 'custom_time' && cleanTime(sched.customTime) === hhmm) {
+      matchedSig = dateKey + '-dhikr-custom-' + clip.id + '-' + hhmm;
+    } else if (
+      swPrayerState.timings &&
+      (sched.timing === 'before_prayer' || sched.timing === 'after_prayer')
+    ) {
+      const offset = sched.timing === 'before_prayer' ? -10 : 10;
+      for (const key of ADHAN_KEYS) {
+        const target = cleanTime(swPrayerState.timings[key]);
+        if (target && addMinutesToTime24(target, offset) === hhmm) {
+          matchedSig = dateKey + '-dhikr-' + sched.timing + '-' + key + '-' + clip.id + '-' + hhmm;
+          break;
+        }
+      }
+    }
+
+    if (matchedSig && !swFiredDhikrSigs.has(matchedSig)) {
+      swFiredDhikrSigs.add(matchedSig);
+      notifyClients({
+        type: 'SW_DHIKR_SCHEDULED_DUE',
+        clipId: clip.id,
+        hhmm,
+        signature: matchedSig,
+      });
     }
   }
 }
@@ -202,10 +256,13 @@ self.addEventListener('message', (event) => {
         swFiredPreAdhanSigs.add(data.payload.signature);
       } else if (String(tag || '').startsWith('adhan-')) {
         swFiredAdhanSigs.add(data.payload.signature);
+      } else if (String(tag || '').startsWith('dhikr-')) {
+        swFiredDhikrSigs.add(data.payload.signature);
       }
     }
     if (self.registration && self.registration.showNotification) {
       const isAdhanTag = String(tag || '').startsWith('adhan-');
+      const isDhikrTag = String(tag || '').startsWith('dhikr-');
       event.waitUntil(
         self.registration
           .showNotification(title, {
@@ -223,18 +280,24 @@ self.addEventListener('message', (event) => {
                     { action: 'mute_adhan', title: 'صامت' },
                   ],
                 }
+              : isDhikrTag
+              ? {
+                  actions: [{ action: 'stop_dhikr', title: 'إيقاف الذكر' }],
+                }
               : {}),
           })
           .catch(() => {})
       );
     }
+  } else if (data.type === 'CLOSE_NOTIFICATION' && data.tag) {
+    event.waitUntil(closeNotificationsByTag(data.tag));
   } else if (data.type === 'SYNC_PRAYER_STATE' && data.payload) {
     swPrayerState = {
       ...swPrayerState,
       ...data.payload,
     };
     if (swCheckTimer === null) {
-      swCheckTimer = setInterval(checkServiceWorkerPrayerSchedule, 10000);
+      swCheckTimer = setInterval(checkServiceWorkerPrayerSchedule, 5000);
     }
     checkServiceWorkerPrayerSchedule();
   }
@@ -371,6 +434,10 @@ self.addEventListener('notificationclick', (event) => {
   }
   if (event.action === 'mute_adhan') {
     event.waitUntil(notifyClients({ type: 'SW_MUTE_ADHAN' }));
+    return;
+  }
+  if (event.action === 'stop_dhikr') {
+    event.waitUntil(notifyClients({ type: 'SW_STOP_DHIKR' }));
     return;
   }
   event.waitUntil(

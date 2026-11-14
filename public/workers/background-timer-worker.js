@@ -10,11 +10,14 @@ let state = {
   dhikrEnabled: false,
   dhikrIntervalMins: 3,
   nextDhikrAtMs: 0,
+  dhikrSchedules: {},
+  dhikrClipsMeta: [],
 };
 
 const ADHAN_KEYS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 const firedAdhanSigs = new Set();
 const firedPreAdhanSigs = new Set();
+const firedDhikrSigs = new Set();
 
 function cleanTime(raw) {
   if (!raw || typeof raw !== 'string') return '';
@@ -63,14 +66,13 @@ function getZonedHHMMAndDate(now, timeZone) {
 function runTick() {
   const nowMs = Date.now();
   const now = new Date(nowMs);
+  const { hhmm, dateKey } = getZonedHHMMAndDate(now, state.timezone);
 
-  // Check Adhan & 10-minute Pre-Adhan
+  // 1. Check Adhan & 10-minute Pre-Adhan
   if (
     state.timings &&
     (state.adhanEnabled || state.adhanNotifEnabled || state.preAdhanEnabled)
   ) {
-    const { hhmm, dateKey } = getZonedHHMMAndDate(now, state.timezone);
-
     for (const key of ADHAN_KEYS) {
       const target = cleanTime(state.timings[key]);
       if (!target) continue;
@@ -108,7 +110,44 @@ function runTick() {
     }
   }
 
-  // Check Periodic Dhikr
+  // 2. Check Scheduled Dhikr & Sheikh Clips (custom_time, before_prayer, after_prayer)
+  const clipsMeta = Array.isArray(state.dhikrClipsMeta) ? state.dhikrClipsMeta : [];
+  const schedules = state.dhikrSchedules || {};
+  for (const clip of clipsMeta) {
+    if (!clip || !clip.id) continue;
+    const sched = schedules[clip.id];
+    if (!sched || sched.timing === 'periodic' || sched.timing === 'off') continue;
+
+    let matchedSig = null;
+    if (sched.timing === 'custom_time' && cleanTime(sched.customTime) === hhmm) {
+      matchedSig = dateKey + '-dhikr-custom-' + clip.id + '-' + hhmm;
+    } else if (
+      state.timings &&
+      (sched.timing === 'before_prayer' || sched.timing === 'after_prayer')
+    ) {
+      const offset = sched.timing === 'before_prayer' ? -10 : 10;
+      for (const key of ADHAN_KEYS) {
+        const target = cleanTime(state.timings[key]);
+        if (target && addMinutesToTime24(target, offset) === hhmm) {
+          matchedSig = dateKey + '-dhikr-' + sched.timing + '-' + key + '-' + clip.id + '-' + hhmm;
+          break;
+        }
+      }
+    }
+
+    if (matchedSig && !firedDhikrSigs.has(matchedSig)) {
+      firedDhikrSigs.add(matchedSig);
+      self.postMessage({
+        type: 'WORKER_DHIKR_SCHEDULED_DUE',
+        clipId: clip.id,
+        hhmm,
+        signature: matchedSig,
+        nowMs,
+      });
+    }
+  }
+
+  // 3. Check Periodic Dhikr
   if (state.dhikrEnabled && state.nextDhikrAtMs > 0) {
     if (nowMs >= state.nextDhikrAtMs) {
       const intervalMs = Math.max(1, state.dhikrIntervalMins || 3) * 60 * 1000;

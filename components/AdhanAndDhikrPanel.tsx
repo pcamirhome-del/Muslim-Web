@@ -76,6 +76,9 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
   const silentKeepAliveAudioRef = useRef<HTMLAudioElement | null>(null);
   const isKeepAliveHijackedRef = useRef<boolean>(false);
   const activeHijackOwnerRef = useRef<'adhan' | 'dhikr' | null>(null);
+  const activeNotifTagRef = useRef<string | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const wakeLockRef = useRef<{ release: () => Promise<void> } | null>(null);
   const workerRef = useRef<Worker | null>(null);
 
   const lastFiredAdhanKeyRef = useRef<string>('');
@@ -203,34 +206,57 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     };
   }, [syncFromStorage]);
 
-  // Update MediaSession metadata for background Keep-Alive when idle
+  const closeActiveNotification = useCallback((tag?: string | null) => {
+    const targetTag = tag || activeNotifTagRef.current;
+    if (!targetTag) return;
+    if (activeNotifTagRef.current === targetTag) {
+      activeNotifTagRef.current = null;
+    }
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.ready
+        .then((reg) => {
+          if (reg.active) {
+            reg.active.postMessage({
+              type: 'CLOSE_NOTIFICATION',
+              tag: targetTag,
+            });
+          }
+          if (reg.getNotifications) {
+            reg
+              .getNotifications({ tag: targetTag })
+              .then((list) => {
+                for (const n of list) n.close();
+              })
+              .catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  // Hide MediaSession notification banner when idle (only show when a clip is actively playing)
   const refreshKeepAliveMediaSession = useCallback(() => {
     if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
-    // Do not overwrite if Adhan or Dhikr is actively speaking right now
-    if (
+    const isAdhanSpeaking =
       (adhanAudioRef.current && !adhanAudioRef.current.paused) ||
-      (dhikrAudioRef.current && !dhikrAudioRef.current.paused)
-    ) {
+      (isKeepAliveHijackedRef.current && activeHijackOwnerRef.current === 'adhan');
+    const isDhikrSpeaking =
+      (dhikrAudioRef.current && !dhikrAudioRef.current.paused) ||
+      (isKeepAliveHijackedRef.current && activeHijackOwnerRef.current === 'dhikr');
+
+    if (isAdhanSpeaking || isDhikrSpeaking) {
       return;
     }
 
     try {
-      const st = liveStateRef.current;
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: st.dhikrEnabled
-          ? `منبه الأذكار والمؤذن التلقائي (كل ${st.dhikrIntervalMins} د)`
-          : `المؤذن التلقائي — ${st.selectedMuadhin.name}`,
-        artist: st.selectedMuadhin.name,
-        album: 'نور الإسلام — يعمل في الخلفية',
-        artwork: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
-      });
-      navigator.mediaSession.playbackState = 'playing';
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.playbackState = 'none';
     } catch {
       // ignore
     }
   }, []);
 
-  // Start or stop Silent Audio Loop Workaround to prevent iOS/Android background throttling
+  // Start or stop Silent Audio Loop + Web Audio sub-audible keep-alive to prevent iOS/Android background throttling
   const ensureSilentKeepAliveLoop = useCallback(() => {
     if (typeof window === 'undefined') return;
     const hasScheduledDhikr =
@@ -252,13 +278,14 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       if (silentKeepAliveAudioRef.current && !isKeepAliveHijackedRef.current) {
         silentKeepAliveAudioRef.current.pause();
       }
+      refreshKeepAliveMediaSession();
       return;
     }
 
     if (!silentKeepAliveAudioRef.current) {
       const silentAudio = new Audio(getSilentKeepAliveWavDataUri());
       silentAudio.loop = true;
-      silentAudio.volume = 0.01;
+      silentAudio.volume = 0.001;
       silentAudio.preload = 'auto';
       silentAudio.setAttribute('playsinline', 'true');
       silentKeepAliveAudioRef.current = silentAudio;
@@ -269,7 +296,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
 
     const audio = silentKeepAliveAudioRef.current;
     audio.loop = true;
-    audio.volume = 0.01;
+    audio.volume = 0.001;
 
     if (audio.paused) {
       audio
@@ -280,6 +307,12 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         .catch(() => {
           // Will be unlocked automatically on user tap/click listener
         });
+    } else {
+      refreshKeepAliveMediaSession();
+    }
+
+    if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume().catch(() => {});
     }
   }, [refreshKeepAliveMediaSession]);
 
@@ -293,14 +326,55 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     silent.pause();
     silent.src = getSilentKeepAliveWavDataUri();
     silent.loop = true;
-    silent.volume = 0.01;
+    silent.volume = 0.001;
     ensureSilentKeepAliveLoop();
   }, [ensureSilentKeepAliveLoop]);
 
-  // Pre-unlock secondary <audio> elements synchronously during user gesture so background playback is never blocked
+  // Pre-unlock all audio channels + Web Audio API keep-alive oscillator + WakeLock during user gesture
   const unlockAllAudioChannels = useCallback(() => {
     ensureSilentKeepAliveLoop();
 
+    // 1. Web Audio API sub-audible keep-alive (keeps process alive without showing OS media player notification)
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtx && !audioCtxRef.current) {
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        gain.gain.value = 0.00001;
+        osc.frequency.value = 1;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        audioCtxRef.current = ctx;
+      }
+      if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
+
+    // 2. Request WakeLock if supported so mobile CPU stays responsive
+    try {
+      const navWithWakeLock = navigator as Navigator & {
+        wakeLock?: { request: (type: 'screen') => Promise<{ release: () => Promise<void> }> };
+      };
+      if (navWithWakeLock.wakeLock && !wakeLockRef.current && document.visibilityState === 'visible') {
+        navWithWakeLock.wakeLock
+          .request('screen')
+          .then((sentinel) => {
+            wakeLockRef.current = sentinel;
+          })
+          .catch(() => {});
+      }
+    } catch {
+      // ignore
+    }
+
+    // 3. Pre-unlock secondary <audio> elements
     const unlockEl = (ref: React.MutableRefObject<HTMLAudioElement | null>) => {
       if (!ref.current) {
         const el = new Audio();
@@ -318,7 +392,6 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           el.pause();
           el.currentTime = 0;
           el.volume = 1.0;
-          el.removeAttribute('src');
           el.dataset.unlocked = '1';
         })
         .catch(() => {});
@@ -336,10 +409,13 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     if (isKeepAliveHijackedRef.current && activeHijackOwnerRef.current === 'adhan') {
       restoreSilentKeepAlive();
     }
+    if (activeNotifTagRef.current && activeNotifTagRef.current.startsWith('adhan-')) {
+      closeActiveNotification(activeNotifTagRef.current);
+    }
     setPreviewingMuadhinId(null);
     setActiveAdhanPrayer(null);
     refreshKeepAliveMediaSession();
-  }, [refreshKeepAliveMediaSession, restoreSilentKeepAlive]);
+  }, [closeActiveNotification, refreshKeepAliveMediaSession, restoreSilentKeepAlive]);
 
   const playAdhanAudio = useCallback(
     (muadhin: MuadhinItem, prayerKey?: PrayerKey) => {
@@ -379,12 +455,14 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         silent.volume = 1.0;
         silent.src = muadhin.audioUrl;
         silent.onended = () => {
+          if (prayerKey) closeActiveNotification(`adhan-${prayerKey}`);
           setPreviewingMuadhinId(null);
           setActiveAdhanPrayer(null);
           restoreSilentKeepAlive();
           refreshKeepAliveMediaSession();
         };
         silent.onerror = () => {
+          if (prayerKey) closeActiveNotification(`adhan-${prayerKey}`);
           setPreviewingMuadhinId(null);
           setActiveAdhanPrayer(null);
           restoreSilentKeepAlive();
@@ -399,8 +477,11 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         return true;
       };
 
-      // When backgrounded/locked on mobile OS, hijack the already-active MediaSession keep-alive element
-      if (typeof document !== 'undefined' && document.hidden && silentKeepAliveAudioRef.current) {
+      // Always prefer the continuously active keep-alive channel for scheduled Adhan or background playback
+      if (
+        silentKeepAliveAudioRef.current &&
+        (Boolean(prayerKey) || (typeof document !== 'undefined' && document.hidden))
+      ) {
         if (playViaKeepAliveChannel()) return;
       }
 
@@ -414,12 +495,14 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       audio.volume = 1.0;
 
       audio.onended = () => {
+        if (prayerKey) closeActiveNotification(`adhan-${prayerKey}`);
         setPreviewingMuadhinId(null);
         setActiveAdhanPrayer(null);
         refreshKeepAliveMediaSession();
       };
 
       audio.onerror = () => {
+        if (prayerKey) closeActiveNotification(`adhan-${prayerKey}`);
         setPreviewingMuadhinId(null);
         setActiveAdhanPrayer(null);
         setAudioNotice('تعذر تشغيل ملف الأذان. تحقق من الاتصال بالإنترنت.');
@@ -433,13 +516,20 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         }
       });
     },
-    [ensureSilentKeepAliveLoop, refreshKeepAliveMediaSession, restoreSilentKeepAlive, stopAdhanAudio]
+    [
+      closeActiveNotification,
+      ensureSilentKeepAliveLoop,
+      refreshKeepAliveMediaSession,
+      restoreSilentKeepAlive,
+      stopAdhanAudio,
+    ]
   );
 
-  // Trigger Service Worker notification (showNotification) when Adhan or 10-min reminder fires
+  // Trigger Service Worker notification (showNotification) when Adhan or Dhikr clip starts playing
   const sendPrayerNotification = useCallback(
     (title: string, body: string, tag: string, signature?: string) => {
       if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+      activeNotifTagRef.current = tag;
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.ready
           .then((reg) => {
@@ -480,9 +570,12 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     if (isKeepAliveHijackedRef.current && activeHijackOwnerRef.current === 'dhikr') {
       restoreSilentKeepAlive();
     }
+    if (activeNotifTagRef.current && activeNotifTagRef.current.startsWith('dhikr-')) {
+      closeActiveNotification(activeNotifTagRef.current);
+    }
     setPlayingDhikrClip(null);
     refreshKeepAliveMediaSession();
-  }, [refreshKeepAliveMediaSession, restoreSilentKeepAlive]);
+  }, [closeActiveNotification, refreshKeepAliveMediaSession, restoreSilentKeepAlive]);
 
   const playNextDhikrClip = useCallback(
     (specificClip?: DhikrAudioClip, fromPeriodicTimer = false) => {
@@ -551,11 +644,13 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         silent.volume = 1.0;
         silent.src = clip.audioUrl;
         silent.onended = () => {
+          closeActiveNotification(`dhikr-${clip.id}`);
           setPlayingDhikrClip(null);
           restoreSilentKeepAlive();
           refreshKeepAliveMediaSession();
         };
         silent.onerror = () => {
+          closeActiveNotification(`dhikr-${clip.id}`);
           setPlayingDhikrClip(null);
           restoreSilentKeepAlive();
           refreshKeepAliveMediaSession();
@@ -568,8 +663,11 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         return true;
       };
 
-      // When backgrounded/locked on mobile OS, hijack the already-active MediaSession keep-alive element
-      if (typeof document !== 'undefined' && document.hidden && silentKeepAliveAudioRef.current) {
+      // Always prefer the continuously active keep-alive channel for scheduled/periodic Dhikr or background playback
+      if (
+        silentKeepAliveAudioRef.current &&
+        (fromPeriodicTimer || Boolean(specificClip) || (typeof document !== 'undefined' && document.hidden))
+      ) {
         if (playViaKeepAliveChannel()) return;
       }
 
@@ -583,11 +681,13 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       audio.volume = 1.0;
 
       audio.onended = () => {
+        closeActiveNotification(`dhikr-${clip.id}`);
         setPlayingDhikrClip(null);
         refreshKeepAliveMediaSession();
       };
 
       audio.onerror = () => {
+        closeActiveNotification(`dhikr-${clip.id}`);
         setPlayingDhikrClip(null);
         setAudioNotice('تعذر تشغيل مقطع الذكر الصوتي. تأكد من الاتصال بالإنترنت.');
         refreshKeepAliveMediaSession();
@@ -600,7 +700,13 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         }
       });
     },
-    [ensureSilentKeepAliveLoop, refreshKeepAliveMediaSession, restoreSilentKeepAlive, stopDhikrAudio]
+    [
+      closeActiveNotification,
+      ensureSilentKeepAliveLoop,
+      refreshKeepAliveMediaSession,
+      restoreSilentKeepAlive,
+      stopDhikrAudio,
+    ]
   );
 
   // Unified handler for Adhan due event (from Web Worker, Service Worker, or Silent Audio clock)
@@ -653,6 +759,35 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     [sendPrayerNotification]
   );
 
+  // Unified handler for Scheduled Dhikr / Sheikh clip due event
+  const triggerScheduledDhikrClip = useCallback(
+    (clipId: string, signature: string) => {
+      if (firedScheduledDhikrSigsRef.current.has(signature)) return;
+      if (firedScheduledDhikrSigsRef.current.size > 100) {
+        firedScheduledDhikrSigsRef.current.clear();
+      }
+      firedScheduledDhikrSigsRef.current.add(signature);
+
+      const isAdhanPlayingNow =
+        Boolean(adhanAudioRef.current && !adhanAudioRef.current.paused) ||
+        (isKeepAliveHijackedRef.current && activeHijackOwnerRef.current === 'adhan');
+      if (isAdhanPlayingNow) return;
+
+      const allDhikrClips = [...EGYPTIAN_DHIKR_CLIPS, ...SHEIKH_DHIKR_CLIPS];
+      const clip = allDhikrClips.find((c) => c.id === clipId);
+      if (!clip) return;
+
+      playNextDhikrClip(clip, true);
+      sendPrayerNotification(
+        `تذكير: ${clip.label}`,
+        clip.egyptianPrompt,
+        `dhikr-${clip.id}`,
+        signature
+      );
+    },
+    [playNextDhikrClip, sendPrayerNotification]
+  );
+
   // Wall-clock evaluator invoked by Web Worker ticks AND Silent Audio timeupdate events
   const evaluateWallClock = useCallback(
     (nowMs: number) => {
@@ -691,44 +826,31 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         }
       }
 
-      // 2. Check Scheduled Dhikr Clips (before_prayer, after_prayer, custom_time)
-      const isAdhanPlayingNow = Boolean(adhanAudioRef.current && !adhanAudioRef.current.paused);
-      if (!isAdhanPlayingNow) {
-        const allDhikrClips = [...EGYPTIAN_DHIKR_CLIPS, ...SHEIKH_DHIKR_CLIPS];
-        for (const clip of allDhikrClips) {
-          const isEgyptian = EGYPTIAN_DHIKR_CLIPS.some((c) => c.id === clip.id);
-          if (isEgyptian && !st.selectedDhikrIds.includes(clip.id)) continue;
-          const sched = st.dhikrSchedules[clip.id];
-          if (!sched || sched.timing === 'periodic' || sched.timing === 'off') continue;
+      // 2. Check Scheduled Dhikr & Sheikh Clips (before_prayer, after_prayer, custom_time)
+      // Note: If the user explicitly set a custom_time / before_prayer / after_prayer on any clip,
+      // play it at its scheduled time regardless of the periodic checkbox!
+      const allDhikrClips = [...EGYPTIAN_DHIKR_CLIPS, ...SHEIKH_DHIKR_CLIPS];
+      for (const clip of allDhikrClips) {
+        const sched = st.dhikrSchedules[clip.id];
+        if (!sched || sched.timing === 'periodic' || sched.timing === 'off') continue;
 
-          let matchedSig: string | null = null;
-          if (sched.timing === 'custom_time' && sched.customTime === hhmm) {
-            matchedSig = `${datePrefix}-dhikr-custom-${clip.id}-${hhmm}`;
-          } else if (st.timings && (sched.timing === 'before_prayer' || sched.timing === 'after_prayer')) {
-            const offset = sched.timing === 'before_prayer' ? -10 : 10;
-            for (const key of ADHAN_PRAYER_KEYS) {
-              const target = cleanTimeString(st.timings[key]);
-              if (target && addMinutesToTime24(target, offset) === hhmm) {
-                matchedSig = `${datePrefix}-dhikr-${sched.timing}-${key}-${clip.id}-${hhmm}`;
-                break;
-              }
+        let matchedSig: string | null = null;
+        if (sched.timing === 'custom_time' && cleanTimeString(sched.customTime) === hhmm) {
+          matchedSig = `${datePrefix}-dhikr-custom-${clip.id}-${hhmm}`;
+        } else if (st.timings && (sched.timing === 'before_prayer' || sched.timing === 'after_prayer')) {
+          const offset = sched.timing === 'before_prayer' ? -10 : 10;
+          for (const key of ADHAN_PRAYER_KEYS) {
+            const target = cleanTimeString(st.timings[key]);
+            if (target && addMinutesToTime24(target, offset) === hhmm) {
+              matchedSig = `${datePrefix}-dhikr-${sched.timing}-${key}-${clip.id}-${hhmm}`;
+              break;
             }
           }
+        }
 
-          if (matchedSig && !firedScheduledDhikrSigsRef.current.has(matchedSig)) {
-            if (firedScheduledDhikrSigsRef.current.size > 100) {
-              firedScheduledDhikrSigsRef.current.clear();
-            }
-            firedScheduledDhikrSigsRef.current.add(matchedSig);
-            playNextDhikrClip(clip);
-            sendPrayerNotification(
-              `تذكير: ${clip.label}`,
-              clip.egyptianPrompt,
-              `dhikr-${clip.id}`,
-              matchedSig
-            );
-            break;
-          }
+        if (matchedSig && !firedScheduledDhikrSigsRef.current.has(matchedSig)) {
+          triggerScheduledDhikrClip(clip.id, matchedSig);
+          break;
         }
       }
 
@@ -746,7 +868,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         setDhikrSecondsLeft(secsLeft);
       }
     },
-    [playNextDhikrClip, sendPrayerNotification, triggerAdhanForPrayer, triggerPreAdhanForPrayer]
+    [playNextDhikrClip, triggerAdhanForPrayer, triggerPreAdhanForPrayer, triggerScheduledDhikrClip]
   );
 
   // Initialize Background Web Worker, Service Worker listener, Silent Audio Keep-Alive & MediaSession handlers
@@ -765,6 +887,8 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           triggerAdhanForPrayer(data.prayerKey as PrayerKey, data.signature);
         } else if (data.type === 'WORKER_PRE_ADHAN_DUE' && data.prayerKey) {
           triggerPreAdhanForPrayer(data.prayerKey as PrayerKey, data.signature);
+        } else if (data.type === 'WORKER_DHIKR_SCHEDULED_DUE' && data.clipId) {
+          triggerScheduledDhikrClip(data.clipId, data.signature);
         } else if (data.type === 'WORKER_DHIKR_DUE') {
           if (typeof data.nextDhikrAtMs === 'number') {
             nextDhikrAtMsRef.current = data.nextDhikrAtMs;
@@ -780,13 +904,15 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       // Fallback if Worker is blocked
     }
 
-    // 2. Listen for Service Worker messages (SW_ADHAN_DUE / SW_PRE_ADHAN_DUE / SW_STOP_ADHAN / SW_MUTE_ADHAN)
+    // 2. Listen for Service Worker messages (SW_ADHAN_DUE / SW_PRE_ADHAN_DUE / SW_DHIKR_SCHEDULED_DUE / SW_STOP_ADHAN / SW_MUTE_ADHAN / SW_STOP_DHIKR)
     const handleSwMessage = (event: MessageEvent) => {
       const data = event.data || {};
       if (data.type === 'SW_ADHAN_DUE' && data.prayerKey) {
         triggerAdhanForPrayer(data.prayerKey as PrayerKey, data.signature);
       } else if (data.type === 'SW_PRE_ADHAN_DUE' && data.prayerKey) {
         triggerPreAdhanForPrayer(data.prayerKey as PrayerKey, data.signature);
+      } else if (data.type === 'SW_DHIKR_SCHEDULED_DUE' && data.clipId) {
+        triggerScheduledDhikrClip(data.clipId, data.signature);
       } else if (data.type === 'SW_STOP_ADHAN') {
         stopAdhanAudio();
       } else if (data.type === 'SW_MUTE_ADHAN') {
@@ -795,6 +921,8 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         try {
           localStorage.setItem('noor_adhan_muted', 'true');
         } catch {}
+      } else if (data.type === 'SW_STOP_DHIKR') {
+        stopDhikrAudio();
       }
     };
     if ('serviceWorker' in navigator) {
@@ -831,7 +959,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     document.addEventListener('visibilitychange', onVisibilityOrFocus);
     window.addEventListener('focus', onVisibilityOrFocus);
 
-    // 6. MediaSession action handlers so OS lock-screen controls keep the session alive
+    // 6. MediaSession action handlers so OS lock-screen controls work during active playback
     if ('mediaSession' in navigator) {
       try {
         navigator.mediaSession.setActionHandler('play', () => {
@@ -883,6 +1011,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     stopDhikrAudio,
     triggerAdhanForPrayer,
     triggerPreAdhanForPrayer,
+    triggerScheduledDhikrClip,
     unlockAllAudioChannels,
   ]);
 
@@ -890,6 +1019,12 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
   useEffect(() => {
     ensureSilentKeepAliveLoop();
     refreshKeepAliveMediaSession();
+
+    const dhikrClipsMeta = [...EGYPTIAN_DHIKR_CLIPS, ...SHEIKH_DHIKR_CLIPS].map((c) => ({
+      id: c.id,
+      label: c.label,
+      egyptianPrompt: c.egyptianPrompt,
+    }));
 
     const payload = {
       timings,
@@ -900,6 +1035,9 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       dhikrEnabled,
       dhikrIntervalMins,
       muadhinName: selectedMuadhin.name,
+      selectedDhikrIds,
+      dhikrSchedules,
+      dhikrClipsMeta,
     };
 
     if (workerRef.current) {
@@ -928,13 +1066,11 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     dhikrEnabled,
     dhikrIntervalMins,
     selectedMuadhin.name,
+    selectedDhikrIds,
+    dhikrSchedules,
     ensureSilentKeepAliveLoop,
     refreshKeepAliveMediaSession,
   ]);
-
-  useEffect(() => {
-    ensureSilentKeepAliveLoop();
-  }, [selectedDhikrIds, dhikrSchedules, ensureSilentKeepAliveLoop]);
 
   useEffect(() => {
     return () => {
@@ -942,6 +1078,10 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       stopDhikrAudio();
       if (silentKeepAliveAudioRef.current) {
         silentKeepAliveAudioRef.current.pause();
+      }
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
       }
     };
   }, [stopAdhanAudio, stopDhikrAudio]);
