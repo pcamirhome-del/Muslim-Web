@@ -2,17 +2,12 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ADHAN_PRAYER_KEYS,
   DEFAULT_EGYPT_LOCATION,
   NextPrayerInfo,
-  PRAYER_LABELS_AR,
   PrayerScheduleData,
   UserLocation,
-  addMinutesToTime24,
-  cleanTimeString,
   computeNextPrayer,
   fetchPrayerSchedule,
-  getZonedClockParts,
   reverseGeocodeArabic,
 } from '@/lib/prayer-utils';
 import { BackgroundShell } from './BackgroundShell';
@@ -136,54 +131,18 @@ export function IslamicApp() {
     return () => clearTimeout(t);
   }, [location, loadSchedule]);
 
-  // Update next prayer countdown every second + fire background Adhan/Pre-Adhan notifications when not on home tab
+  // Update next prayer countdown every second
   const activeTimezone = schedule?.timezone || location.timezone;
   useEffect(() => {
     if (!schedule) return;
     const tick = () => {
       const now = new Date();
       setNextPrayer(computeNextPrayer(schedule.timings, now, activeTimezone));
-
-      if (activeTab !== 'home' && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        const clock = getZonedClockParts(now, activeTimezone);
-        if (clock.seconds === 0) {
-          const hhmm = `${String(clock.hours24).padStart(2, '0')}:${String(clock.minutes).padStart(2, '0')}`;
-          try {
-            const adhanNotifOn = localStorage.getItem('noor_adhan_notif_enabled') !== 'false';
-            const preAdhanOn = localStorage.getItem('noor_pre_adhan_enabled') !== 'false';
-            for (const key of ADHAN_PRAYER_KEYS) {
-              const target = cleanTimeString(schedule.timings[key]);
-              if (adhanNotifOn && target === hhmm) {
-                const sig = `${now.toDateString()}-${key}-${hhmm}`;
-                if (localStorage.getItem('noor_last_adhan_sig') !== sig) {
-                  localStorage.setItem('noor_last_adhan_sig', sig);
-                  new Notification(`حان الآن موعد أذان ${PRAYER_LABELS_AR[key]}`, {
-                    body: `توقيت ${location.city}`,
-                    icon: '/pwa-192x192.png',
-                  });
-                }
-              }
-              if (preAdhanOn && addMinutesToTime24(target, -10) === hhmm) {
-                const preSig = `${now.toDateString()}-pre-${key}-${hhmm}`;
-                if (localStorage.getItem('noor_last_preadhan_sig') !== preSig) {
-                  localStorage.setItem('noor_last_preadhan_sig', preSig);
-                  new Notification(`اقترب موعد صلاة ${PRAYER_LABELS_AR[key]}`, {
-                    body: 'تبقى ١٠ دقائق على دخول وقت الصلاة',
-                    icon: '/pwa-192x192.png',
-                  });
-                }
-              }
-            }
-          } catch {
-            // ignore notification/storage errors
-          }
-        }
-      }
     };
     tick();
     const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-  }, [schedule, activeTimezone, activeTab, location.city]);
+  }, [schedule, activeTimezone]);
 
   // GPS Auto-Location Handler
   const handleRequestGPS = useCallback(() => {
@@ -307,13 +266,16 @@ export function IslamicApp() {
                 onClosePreview={() => setRamadanPreview(false)}
               />
             )}
-
-            <AdhanAndDhikrPanel
-              timings={schedule?.timings || null}
-              timezone={activeTimezone}
-            />
           </>
         )}
+
+        {/* Always-mounted Adhan & Dhikr background engine (visible on Home, stays alive across all tabs) */}
+        <div className={activeTab === 'home' ? 'block' : 'hidden'}>
+          <AdhanAndDhikrPanel
+            timings={schedule?.timings || null}
+            timezone={activeTimezone}
+          />
+        </div>
 
         {activeTab === 'radio' && (
           <LiveRadioPlayer

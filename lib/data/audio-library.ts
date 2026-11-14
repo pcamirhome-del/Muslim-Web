@@ -99,50 +99,88 @@ export const MUADHINS_LIST: MuadhinItem[] = [
 ];
 
 /**
- * Short, crystal-clear human-voiced Dhikr MP3 clips (Zero robotic TTS)
+ * Short, trimmed human-voiced Dhikr MP3 clips speaking ONLY the exact title phrase
+ * without introductions or extra words (Zero robotic TTS)
  */
 export const EGYPTIAN_DHIKR_CLIPS: DhikrAudioClip[] = [
   {
     id: 'salawat',
-    label: 'صلِّ على النبي ﷺ',
-    egyptianPrompt: 'صلِّ على الحبيب قلبك يطيب — اللهم صلِّ وسلم على نبينا محمد',
-    speaker: 'ذكر مسموع بصوت بشري نقي',
-    audioUrl:
-      'https://archive.org/download/2_20250602_20250602_1135/adkar_be3d_adan/3.mp3',
+    label: 'صلي على النبي',
+    egyptianPrompt: 'صلي على النبي',
+    speaker: 'ذكر قصير مباشر',
+    audioUrl: '/audio/dhikr/salli-ala-nabi.mp3',
   },
   {
     id: 'subhanallah',
     label: 'سبحان الله وبحمده',
-    egyptianPrompt: 'سبحان الله وبحمده عدد خلقه ورضا نفسه وزنة عرشه ومداد كلماته',
-    speaker: 'ذكر مسموع بصوت بشري نقي',
-    audioUrl:
-      'https://archive.org/download/20260404_20260404_1649/%D8%B3%D8%A8%D8%AD%D8%A7%D9%86%20%D8%A7%D9%84%D9%84%D9%87%20%D9%88%D8%A8%D8%AD%D9%85%D8%AF%D9%87%20%D8%B9%D8%AF%D8%AF%20%D8%AE%D9%84%D9%82%D9%87%20%D9%88%D8%B1%D8%B6%D8%A7%20%D9%86%D9%81%D8%B3%D9%87%20%D9%88%D8%B2%D9%86%D8%A9%20%D8%B9%D8%B1%D8%B4%D9%87%20%D9%88%D9%85%D8%AF%D8%A7%D8%AF%20%D9%83%D9%84%D9%85%D8%A7%D8%AA%D9%87.mp3',
-  },
-  {
-    id: 'istighfar',
-    label: 'استغفر الله العظيم وأتوب إليه',
-    egyptianPrompt: 'استغفر ربنا دلوقتي — أستغفر الله العظيم الذي لا إله إلا هو الحي القيوم وأتوب إليه',
-    speaker: 'ذكر مسموع بصوت بشري نقي',
-    audioUrl:
-      'https://archive.org/download/20260404_20260404_1728/%D8%A7%D8%B3%D8%AA%D8%BA%D9%81%D8%B1%20%D8%A7%D9%84%D9%84%D9%87%20%D8%A7%D9%84%D8%B9%D8%B8%D9%8A%D9%85%20%D8%A7%D9%84%D8%B0%D9%8A%20%D9%84%D8%A7%20%D8%A5%D9%84%D9%87%20%D8%A5%D9%84%D8%A7%20%D9%87%D9%88%20%D8%A7%D9%84%D8%AD%D9%8A%20%D8%A7%D9%84%D9%82%D9%8A%D9%88%D9%85%20%D9%88%D8%A3%D8%AA%D9%88%D8%A8%20%D8%A5%D9%84%D9%8A%D9%87%20%20%D8%A7%D8%B3%D8%AA%D8%BA%D9%81%D8%A7%D8%B1.mp3',
+    egyptianPrompt: 'سبحان الله وبحمده',
+    speaker: 'ذكر قصير مباشر',
+    audioUrl: '/audio/dhikr/subhan-allah-wabihamdih.mp3',
   },
   {
     id: 'hawqala',
     label: 'لا حول ولا قوة إلا بالله',
-    egyptianPrompt: 'كنز من كنوز الجنة — لا حول ولا قوة إلا بالله العلي العظيم',
-    speaker: 'ذكر مسموع بصوت بشري نقي',
-    audioUrl:
-      'https://archive.org/download/2_20250602_20250602_1135/adkar_be3d_adan/1.mp3',
+    egyptianPrompt: 'لا حول ولا قوة إلا بالله',
+    speaker: 'ذكر قصير مباشر',
+    audioUrl: '/audio/dhikr/la-hawla-wala-quwwata.mp3',
   },
   {
     id: 'subhanallah_palm',
     label: 'سبحان الله العظيم وبحمده',
-    egyptianPrompt: 'اغرس نخلة في الجنة — سبحان الله العظيم وبحمده',
-    speaker: 'ذكر مسموع بصوت بشري نقي',
-    audioUrl:
-      'https://archive.org/download/100_20260403_202604/%D8%A7%D9%84%D8%AD%D8%AF%D9%8A%D8%AB%20%D8%A7%D9%84%D8%B4%D8%B1%D9%8A%D9%81%20_%20%D9%85%D9%86%20%D9%82%D8%A7%D9%84%20%D8%B3%D8%A8%D8%AD%D8%A7%D9%86%20%D8%A7%D9%84%D9%84%D9%87%20%D8%A7%D9%84%D8%B9%D8%B8%D9%8A%D9%85%20%20%D9%88%D8%A8%D8%AD%D9%85%D8%AF%D9%87%20%20%D8%BA%D8%B1%D8%B3%D8%AA%20%D9%84%D9%87%20%D9%86%D8%AE%D9%84%D8%A9%20%D9%81%D9%8A%20%D8%A7%D9%84%D8%AC%D9%86%D8%A9.mp3',
+    egyptianPrompt: 'سبحان الله العظيم وبحمده',
+    speaker: 'ذكر قصير مباشر',
+    audioUrl: '/audio/dhikr/subhan-allah-alazim.mp3',
   },
 ];
+
+/**
+ * Generates a 2-second 8kHz 16-bit mono PCM WAV base64 data URI with an imperceptible
+ * 1-LSB alternating signal so iOS/Android keep the background audio session & MediaSession alive.
+ */
+let cachedSilentWavUri: string | null = null;
+export function getSilentKeepAliveWavDataUri(): string {
+  if (cachedSilentWavUri) return cachedSilentWavUri;
+  const sampleRate = 8000;
+  const durationSeconds = 2;
+  const numSamples = sampleRate * durationSeconds;
+  const dataSize = numSamples * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  const writeStr = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true); // PCM chunk size
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, 1, true); // Mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // Byte rate
+  view.setUint16(32, 2, true); // Block align
+  view.setUint16(34, 16, true); // Bits per sample
+  writeStr(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  for (let i = 0; i < numSamples; i++) {
+    // 1-LSB sub-audible dither prevents OS digital-zero auto-suspend
+    view.setInt16(44 + i * 2, i % 2 === 0 ? 1 : -1, true);
+  }
+
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = typeof btoa === 'function' ? btoa(binary) : '';
+  cachedSilentWavUri = `data:audio/wav;base64,${base64}`;
+  return cachedSilentWavUri;
+}
 
 /**
  * Authentic Egyptian Scholars' Supplications & Spiritual Clips
