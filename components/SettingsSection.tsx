@@ -26,7 +26,13 @@ import {
   RiwayahId,
   resolveReciterAndStream,
 } from '@/lib/data/quran-reciters';
-import { DhikrVoiceMode, MUADHINS_LIST } from '@/lib/data/audio-library';
+import {
+  DEFAULT_SELECTED_DHIKR_IDS,
+  DhikrVoiceMode,
+  EGYPTIAN_DHIKR_CLIPS,
+  MUADHINS_LIST,
+  parseSelectedDhikrIds,
+} from '@/lib/data/audio-library';
 import { useFullQuranDownloader } from '@/hooks/useFullQuranDownloader';
 
 interface SettingsSectionProps {
@@ -58,6 +64,7 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
   const [dhikrEnabled, setDhikrEnabled] = useState<boolean>(false);
   const [dhikrInterval, setDhikrInterval] = useState<number>(3);
   const [dhikrMode, setDhikrMode] = useState<DhikrVoiceMode>('egyptian_dhikr');
+  const [selectedDhikrIds, setSelectedDhikrIds] = useState<string[]>(DEFAULT_SELECTED_DHIKR_IDS);
 
   // Full Quran Offline Downloader Selection
   const [selectedReciterId, setSelectedReciterId] = useState<string>('abdulbasit');
@@ -98,6 +105,8 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
 
         const sMode = localStorage.getItem('noor_dhikr_mode') as DhikrVoiceMode | null;
         if (sMode === 'egyptian_dhikr' || sMode === 'sheikh') setDhikrMode(sMode);
+
+        setSelectedDhikrIds(parseSelectedDhikrIds(localStorage.getItem('noor_selected_dhikrs')));
       } catch {
         // ignore storage errors
       }
@@ -529,6 +538,79 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
             <Clock className="h-3.5 w-3.5" />
             <span>تكرار الأذكار كل 5 دقائق</span>
           </button>
+
+          {/* Select Specific Dhikrs (Checkboxes) */}
+          <div className="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                تحديد الأذكار المفعّلة في المنبه ({selectedDhikrIds.length} / {EGYPTIAN_DHIKR_CLIPS.length}):
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedDhikrIds(DEFAULT_SELECTED_DHIKR_IDS);
+                  persistSetting(
+                    'noor_selected_dhikrs',
+                    JSON.stringify(DEFAULT_SELECTED_DHIKR_IDS),
+                    'تم تفعيل جميع الأذكار الأربعة'
+                  );
+                }}
+                className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 transition-colors"
+              >
+                تحديد الكل
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {EGYPTIAN_DHIKR_CLIPS.map((clip) => {
+                const isChecked = selectedDhikrIds.includes(clip.id);
+                return (
+                  <label
+                    key={clip.id}
+                    className={`flex min-h-[44px] cursor-pointer items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition-colors ${
+                      isChecked
+                        ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200'
+                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/60 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          if (isChecked && selectedDhikrIds.length <= 1) {
+                            setSettingsSavedNotice('يجب إبقاء ذكر واحد على الأقل مفعّلاً');
+                            setTimeout(() => setSettingsSavedNotice(null), 2200);
+                            return;
+                          }
+                          const next = isChecked
+                            ? selectedDhikrIds.filter((id) => id !== clip.id)
+                            : [...selectedDhikrIds, clip.id];
+                          setSelectedDhikrIds(next);
+                          persistSetting(
+                            'noor_selected_dhikrs',
+                            JSON.stringify(next),
+                            isChecked ? `تم إيقاف "${clip.label}"` : `تم تفعيل "${clip.label}"`
+                          );
+                        }}
+                        className="h-4 w-4 accent-emerald-600 rounded cursor-pointer shrink-0"
+                      />
+                      <span className="truncate">{clip.label}</span>
+                    </span>
+                    <span
+                      className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-extrabold ${
+                        isChecked
+                          ? 'bg-emerald-700 text-white'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                      }`}
+                    >
+                      {isChecked ? 'مفعّل' : 'متوقف'}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </section>
 

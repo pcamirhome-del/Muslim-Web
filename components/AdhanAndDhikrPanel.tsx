@@ -14,6 +14,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import {
+  DEFAULT_SELECTED_DHIKR_IDS,
   DhikrAudioClip,
   DhikrVoiceMode,
   EGYPTIAN_DHIKR_CLIPS,
@@ -21,6 +22,7 @@ import {
   MuadhinItem,
   SHEIKH_DHIKR_CLIPS,
   getSilentKeepAliveWavDataUri,
+  parseSelectedDhikrIds,
 } from '@/lib/data/audio-library';
 import {
   ADHAN_PRAYER_KEYS,
@@ -54,6 +56,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
   const [dhikrEnabled, setDhikrEnabled] = useState<boolean>(false);
   const [dhikrIntervalMins, setDhikrIntervalMins] = useState<number>(3);
   const [dhikrMode, setDhikrMode] = useState<DhikrVoiceMode>('egyptian_dhikr');
+  const [selectedDhikrIds, setSelectedDhikrIds] = useState<string[]>(DEFAULT_SELECTED_DHIKR_IDS);
   const [dhikrSecondsLeft, setDhikrSecondsLeft] = useState<number>(180);
   const [playingDhikrClip, setPlayingDhikrClip] = useState<DhikrAudioClip | null>(null);
   const [audioNotice, setAudioNotice] = useState<string | null>(null);
@@ -81,6 +84,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     dhikrEnabled,
     dhikrIntervalMins,
     dhikrMode,
+    selectedDhikrIds,
     selectedMuadhin,
   });
 
@@ -94,6 +98,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       dhikrEnabled,
       dhikrIntervalMins,
       dhikrMode,
+      selectedDhikrIds,
       selectedMuadhin,
     };
   }, [
@@ -105,6 +110,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     dhikrEnabled,
     dhikrIntervalMins,
     dhikrMode,
+    selectedDhikrIds,
     selectedMuadhin,
   ]);
 
@@ -140,6 +146,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       if (savedMode === 'egyptian_dhikr' || savedMode === 'sheikh') {
         setDhikrMode(savedMode);
       }
+      setSelectedDhikrIds(parseSelectedDhikrIds(localStorage.getItem('noor_selected_dhikrs')));
       const savedLastAdhan = localStorage.getItem('noor_last_adhan_sig');
       if (savedLastAdhan) {
         lastFiredAdhanKeyRef.current = savedLastAdhan;
@@ -359,7 +366,14 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       ensureSilentKeepAliveLoop();
 
       const currentMode = liveStateRef.current.dhikrMode;
-      const pool = currentMode === 'egyptian_dhikr' ? EGYPTIAN_DHIKR_CLIPS : SHEIKH_DHIKR_CLIPS;
+      const basePool = currentMode === 'egyptian_dhikr' ? EGYPTIAN_DHIKR_CLIPS : SHEIKH_DHIKR_CLIPS;
+      const selectedIds = liveStateRef.current.selectedDhikrIds;
+      const filteredPool =
+        currentMode === 'egyptian_dhikr'
+          ? basePool.filter((c) => selectedIds.includes(c.id))
+          : basePool;
+      const pool = filteredPool.length > 0 ? filteredPool : basePool;
+
       const clip = specificClip || pool[dhikrIndexRef.current % pool.length];
       if (!specificClip) {
         dhikrIndexRef.current = (dhikrIndexRef.current + 1) % pool.length;
@@ -1064,41 +1078,73 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           </div>
         </div>
 
-        {/* Active / Clickable Clips Preview List */}
+        {/* Active / Clickable Clips Preview List with Selection Checkboxes */}
         <div className="space-y-1.5 pt-1">
           {activePool.map((clip) => {
             const isPlaying = playingDhikrClip?.id === clip.id;
+            const isSelected =
+              dhikrMode !== 'egyptian_dhikr' || selectedDhikrIds.includes(clip.id);
             return (
-              <button
+              <div
                 key={clip.id}
-                type="button"
-                onClick={() => (isPlaying ? stopDhikrAudio() : playNextDhikrClip(clip))}
-                className={`flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 text-right transition-colors ${
+                className={`flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 transition-colors ${
                   isPlaying
                     ? 'border-emerald-500 bg-emerald-500/15'
-                    : 'border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/60 hover:border-amber-500/40'
+                    : isSelected
+                      ? 'border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/60 hover:border-amber-500/40'
+                      : 'border-slate-200/60 dark:border-slate-800/60 bg-slate-100/60 dark:bg-slate-900/40 opacity-65'
                 }`}
               >
-                <span className="block min-w-0 flex-1">
-                  <span className="block text-xs font-bold truncate">{clip.label}</span>
-                  {clip.egyptianPrompt !== clip.label && (
-                    <span className="block text-[11px] text-slate-600 dark:text-slate-300 truncate">
-                      {clip.egyptianPrompt}
-                    </span>
-                  )}
-                </span>
-                <span
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white ${
-                    isPlaying ? 'bg-rose-600' : 'bg-emerald-700'
-                  }`}
+                {dhikrMode === 'egyptian_dhikr' && (
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    aria-label={`تفعيل أو إيقاف ${clip.label}`}
+                    onChange={() => {
+                      if (isSelected && selectedDhikrIds.length <= 1) {
+                        setAudioNotice('يجب تحديد ذكر واحد على الأقل للتنبيه الدوري.');
+                        return;
+                      }
+                      const next = isSelected
+                        ? selectedDhikrIds.filter((id) => id !== clip.id)
+                        : [...selectedDhikrIds, clip.id];
+                      setSelectedDhikrIds(next);
+                      setAudioNotice(null);
+                      try {
+                        localStorage.setItem('noor_selected_dhikrs', JSON.stringify(next));
+                      } catch {}
+                      window.dispatchEvent(new Event('noor-settings-updated'));
+                    }}
+                    className="h-4 w-4 accent-emerald-600 rounded cursor-pointer shrink-0"
+                  />
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => (isPlaying ? stopDhikrAudio() : playNextDhikrClip(clip))}
+                  className="flex flex-1 min-w-0 items-center justify-between gap-2 text-right"
                 >
-                  {isPlaying ? (
-                    <Square className="h-3.5 w-3.5 fill-current" />
-                  ) : (
-                    <Play className="h-3.5 w-3.5 fill-current" />
-                  )}
-                </span>
-              </button>
+                  <span className="block min-w-0 flex-1">
+                    <span className="block text-xs font-bold truncate">{clip.label}</span>
+                    {clip.egyptianPrompt !== clip.label && (
+                      <span className="block text-[11px] text-slate-600 dark:text-slate-300 truncate">
+                        {clip.egyptianPrompt}
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white ${
+                      isPlaying ? 'bg-rose-600' : 'bg-emerald-700'
+                    }`}
+                  >
+                    {isPlaying ? (
+                      <Square className="h-3.5 w-3.5 fill-current" />
+                    ) : (
+                      <Play className="h-3.5 w-3.5 fill-current" />
+                    )}
+                  </span>
+                </button>
+              </div>
             );
           })}
         </div>

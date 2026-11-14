@@ -133,6 +133,25 @@ export const EGYPTIAN_DHIKR_CLIPS: DhikrAudioClip[] = [
   },
 ];
 
+export const DEFAULT_SELECTED_DHIKR_IDS: string[] = EGYPTIAN_DHIKR_CLIPS.map((c) => c.id);
+
+export function parseSelectedDhikrIds(raw: string | null): string[] {
+  if (!raw) return DEFAULT_SELECTED_DHIKR_IDS;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const validIds = parsed.filter(
+        (id): id is string =>
+          typeof id === 'string' && EGYPTIAN_DHIKR_CLIPS.some((c) => c.id === id)
+      );
+      if (validIds.length > 0) return validIds;
+    }
+  } catch {
+    // ignore malformed storage value
+  }
+  return DEFAULT_SELECTED_DHIKR_IDS;
+}
+
 /**
  * Generates a 2-second 8kHz 16-bit mono PCM WAV base64 data URI with an imperceptible
  * 1-LSB alternating signal so iOS/Android keep the background audio session & MediaSession alive.
