@@ -7,6 +7,7 @@ import {
   Play,
   Square,
   Volume2,
+  VolumeX,
   Clock,
   Sparkles,
   Check,
@@ -48,6 +49,7 @@ interface AdhanAndDhikrPanelProps {
 export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProps) {
   // Adhan state
   const [adhanEnabled, setAdhanEnabled] = useState<boolean>(true);
+  const [adhanMuted, setAdhanMuted] = useState<boolean>(false);
   const [adhanNotifEnabled, setAdhanNotifEnabled] = useState<boolean>(true);
   const [preAdhanEnabled, setPreAdhanEnabled] = useState<boolean>(true);
   const [selectedMuadhinId, setSelectedMuadhinId] = useState<string>('tobar');
@@ -58,7 +60,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     'default'
   );
 
-  // Dhikr reminder state (1 to 5 minutes)
+  // Dhikr reminder state (1 to 5 minutes, or disabled when no time is active)
   const [dhikrEnabled, setDhikrEnabled] = useState<boolean>(false);
   const [dhikrIntervalMins, setDhikrIntervalMins] = useState<number>(3);
   const [dhikrMode, setDhikrMode] = useState<DhikrVoiceMode>('egyptian_dhikr');
@@ -72,6 +74,8 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
   const adhanAudioRef = useRef<HTMLAudioElement | null>(null);
   const dhikrAudioRef = useRef<HTMLAudioElement | null>(null);
   const silentKeepAliveAudioRef = useRef<HTMLAudioElement | null>(null);
+  const isKeepAliveHijackedRef = useRef<boolean>(false);
+  const activeHijackOwnerRef = useRef<'adhan' | 'dhikr' | null>(null);
   const workerRef = useRef<Worker | null>(null);
 
   const lastFiredAdhanKeyRef = useRef<string>('');
@@ -88,6 +92,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     timings,
     timezone,
     adhanEnabled,
+    adhanMuted,
     adhanNotifEnabled,
     preAdhanEnabled,
     dhikrEnabled,
@@ -103,6 +108,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       timings,
       timezone,
       adhanEnabled,
+      adhanMuted,
       adhanNotifEnabled,
       preAdhanEnabled,
       dhikrEnabled,
@@ -116,6 +122,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     timings,
     timezone,
     adhanEnabled,
+    adhanMuted,
     adhanNotifEnabled,
     preAdhanEnabled,
     dhikrEnabled,
@@ -135,6 +142,10 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       const savedAdhanEnabled = localStorage.getItem('noor_adhan_enabled');
       if (savedAdhanEnabled !== null) {
         setAdhanEnabled(savedAdhanEnabled === 'true');
+      }
+      const savedAdhanMuted = localStorage.getItem('noor_adhan_muted');
+      if (savedAdhanMuted !== null) {
+        setAdhanMuted(savedAdhanMuted === 'true');
       }
       const savedAdhanNotif = localStorage.getItem('noor_adhan_notif_enabled');
       if (savedAdhanNotif !== null) {
@@ -225,11 +236,11 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     const hasScheduledDhikr =
       liveStateRef.current.selectedDhikrIds.some((id) => {
         const sched = liveStateRef.current.dhikrSchedules[id];
-        return sched && sched.timing !== 'periodic';
+        return sched && sched.timing !== 'periodic' && sched.timing !== 'off';
       }) ||
       SHEIKH_DHIKR_CLIPS.some((c) => {
         const sched = liveStateRef.current.dhikrSchedules[c.id];
-        return sched && sched.timing !== 'periodic';
+        return sched && sched.timing !== 'periodic' && sched.timing !== 'off';
       });
     const shouldKeepAlive =
       liveStateRef.current.adhanEnabled ||
@@ -238,7 +249,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       hasScheduledDhikr;
 
     if (!shouldKeepAlive) {
-      if (silentKeepAliveAudioRef.current) {
+      if (silentKeepAliveAudioRef.current && !isKeepAliveHijackedRef.current) {
         silentKeepAliveAudioRef.current.pause();
       }
       return;
@@ -247,11 +258,14 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     if (!silentKeepAliveAudioRef.current) {
       const silentAudio = new Audio(getSilentKeepAliveWavDataUri());
       silentAudio.loop = true;
-      silentAudio.volume = 0.01; // Near-zero volume so user hears nothing while OS keeps audio session awake
+      silentAudio.volume = 0.01;
       silentAudio.preload = 'auto';
       silentAudio.setAttribute('playsinline', 'true');
       silentKeepAliveAudioRef.current = silentAudio;
     }
+
+    // Do not interrupt active Adhan or Dhikr playing through the keep-alive channel
+    if (isKeepAliveHijackedRef.current) return;
 
     const audio = silentKeepAliveAudioRef.current;
     audio.loop = true;
@@ -264,20 +278,68 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           refreshKeepAliveMediaSession();
         })
         .catch(() => {
-          // Will be unlocked automatically on first user tap/click listener below
+          // Will be unlocked automatically on user tap/click listener
         });
     }
   }, [refreshKeepAliveMediaSession]);
+
+  const restoreSilentKeepAlive = useCallback(() => {
+    const silent = silentKeepAliveAudioRef.current;
+    isKeepAliveHijackedRef.current = false;
+    activeHijackOwnerRef.current = null;
+    if (!silent) return;
+    silent.onended = null;
+    silent.onerror = null;
+    silent.pause();
+    silent.src = getSilentKeepAliveWavDataUri();
+    silent.loop = true;
+    silent.volume = 0.01;
+    ensureSilentKeepAliveLoop();
+  }, [ensureSilentKeepAliveLoop]);
+
+  // Pre-unlock secondary <audio> elements synchronously during user gesture so background playback is never blocked
+  const unlockAllAudioChannels = useCallback(() => {
+    ensureSilentKeepAliveLoop();
+
+    const unlockEl = (ref: React.MutableRefObject<HTMLAudioElement | null>) => {
+      if (!ref.current) {
+        const el = new Audio();
+        el.preload = 'auto';
+        el.setAttribute('playsinline', 'true');
+        ref.current = el;
+      }
+      const el = ref.current;
+      if (el.dataset.unlocked === '1') return;
+      if (!el.paused && el.src && !el.src.startsWith('data:audio/wav')) return;
+      el.src = getSilentKeepAliveWavDataUri();
+      el.volume = 0.001;
+      el.play()
+        .then(() => {
+          el.pause();
+          el.currentTime = 0;
+          el.volume = 1.0;
+          el.removeAttribute('src');
+          el.dataset.unlocked = '1';
+        })
+        .catch(() => {});
+    };
+
+    unlockEl(adhanAudioRef);
+    unlockEl(dhikrAudioRef);
+  }, [ensureSilentKeepAliveLoop]);
 
   const stopAdhanAudio = useCallback(() => {
     if (adhanAudioRef.current) {
       adhanAudioRef.current.pause();
       adhanAudioRef.current.currentTime = 0;
     }
+    if (isKeepAliveHijackedRef.current && activeHijackOwnerRef.current === 'adhan') {
+      restoreSilentKeepAlive();
+    }
     setPreviewingMuadhinId(null);
     setActiveAdhanPrayer(null);
     refreshKeepAliveMediaSession();
-  }, [refreshKeepAliveMediaSession]);
+  }, [refreshKeepAliveMediaSession, restoreSilentKeepAlive]);
 
   const playAdhanAudio = useCallback(
     (muadhin: MuadhinItem, prayerKey?: PrayerKey) => {
@@ -285,38 +347,11 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       setAudioNotice(null);
       ensureSilentKeepAliveLoop();
 
-      if (!adhanAudioRef.current) {
-        adhanAudioRef.current = new Audio();
-        adhanAudioRef.current.preload = 'auto';
-        adhanAudioRef.current.setAttribute('playsinline', 'true');
-      }
-      const audio = adhanAudioRef.current;
-      audio.src = muadhin.audioUrl;
-      audio.volume = 1.0;
-
       if (prayerKey) {
         setActiveAdhanPrayer(prayerKey);
       } else {
         setPreviewingMuadhinId(muadhin.id);
       }
-
-      audio.onended = () => {
-        setPreviewingMuadhinId(null);
-        setActiveAdhanPrayer(null);
-        refreshKeepAliveMediaSession();
-      };
-
-      audio.onerror = () => {
-        setPreviewingMuadhinId(null);
-        setActiveAdhanPrayer(null);
-        setAudioNotice('تعذر تشغيل ملف الأذان. تحقق من الاتصال بالإنترنت.');
-        refreshKeepAliveMediaSession();
-      };
-
-      audio.play().catch(() => {
-        setPreviewingMuadhinId(null);
-        setAudioNotice('اضغط زر التجربة لتفعيل الصوت في المتصفح.');
-      });
 
       if ('mediaSession' in navigator) {
         try {
@@ -333,8 +368,72 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           // ignore
         }
       }
+
+      const playViaKeepAliveChannel = () => {
+        const silent = silentKeepAliveAudioRef.current;
+        if (!silent) return false;
+        isKeepAliveHijackedRef.current = true;
+        activeHijackOwnerRef.current = 'adhan';
+        silent.pause();
+        silent.loop = false;
+        silent.volume = 1.0;
+        silent.src = muadhin.audioUrl;
+        silent.onended = () => {
+          setPreviewingMuadhinId(null);
+          setActiveAdhanPrayer(null);
+          restoreSilentKeepAlive();
+          refreshKeepAliveMediaSession();
+        };
+        silent.onerror = () => {
+          setPreviewingMuadhinId(null);
+          setActiveAdhanPrayer(null);
+          restoreSilentKeepAlive();
+          refreshKeepAliveMediaSession();
+        };
+        silent.play().catch(() => {
+          setPreviewingMuadhinId(null);
+          setActiveAdhanPrayer(null);
+          restoreSilentKeepAlive();
+          setAudioNotice('اضغط زر التجربة لتفعيل الصوت في المتصفح.');
+        });
+        return true;
+      };
+
+      // When backgrounded/locked on mobile OS, hijack the already-active MediaSession keep-alive element
+      if (typeof document !== 'undefined' && document.hidden && silentKeepAliveAudioRef.current) {
+        if (playViaKeepAliveChannel()) return;
+      }
+
+      if (!adhanAudioRef.current) {
+        adhanAudioRef.current = new Audio();
+        adhanAudioRef.current.preload = 'auto';
+        adhanAudioRef.current.setAttribute('playsinline', 'true');
+      }
+      const audio = adhanAudioRef.current;
+      audio.src = muadhin.audioUrl;
+      audio.volume = 1.0;
+
+      audio.onended = () => {
+        setPreviewingMuadhinId(null);
+        setActiveAdhanPrayer(null);
+        refreshKeepAliveMediaSession();
+      };
+
+      audio.onerror = () => {
+        setPreviewingMuadhinId(null);
+        setActiveAdhanPrayer(null);
+        setAudioNotice('تعذر تشغيل ملف الأذان. تحقق من الاتصال بالإنترنت.');
+        refreshKeepAliveMediaSession();
+      };
+
+      audio.play().catch(() => {
+        if (!playViaKeepAliveChannel()) {
+          setPreviewingMuadhinId(null);
+          setAudioNotice('اضغط زر التجربة لتفعيل الصوت في المتصفح.');
+        }
+      });
     },
-    [ensureSilentKeepAliveLoop, refreshKeepAliveMediaSession, stopAdhanAudio]
+    [ensureSilentKeepAliveLoop, refreshKeepAliveMediaSession, restoreSilentKeepAlive, stopAdhanAudio]
   );
 
   // Trigger Service Worker notification (showNotification) when Adhan or 10-min reminder fires
@@ -378,9 +477,12 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       dhikrAudioRef.current.pause();
       dhikrAudioRef.current.currentTime = 0;
     }
+    if (isKeepAliveHijackedRef.current && activeHijackOwnerRef.current === 'dhikr') {
+      restoreSilentKeepAlive();
+    }
     setPlayingDhikrClip(null);
     refreshKeepAliveMediaSession();
-  }, [refreshKeepAliveMediaSession]);
+  }, [refreshKeepAliveMediaSession, restoreSilentKeepAlive]);
 
   const playNextDhikrClip = useCallback(
     (specificClip?: DhikrAudioClip, fromPeriodicTimer = false) => {
@@ -401,12 +503,18 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         return;
       }
 
+      const activeNonOffPool = selectedPool.filter(
+        (c) => (schedules[c.id]?.timing || 'periodic') !== 'off'
+      );
+
       const pool =
         periodicPool.length > 0
           ? periodicPool
-          : selectedPool.length > 0
-            ? selectedPool
-            : basePool;
+          : activeNonOffPool.length > 0
+            ? activeNonOffPool
+            : selectedPool.length > 0
+              ? selectedPool
+              : basePool;
 
       stopDhikrAudio();
       setAudioNotice(null);
@@ -417,31 +525,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
         dhikrIndexRef.current = (dhikrIndexRef.current + 1) % pool.length;
       }
 
-      if (!dhikrAudioRef.current) {
-        dhikrAudioRef.current = new Audio();
-        dhikrAudioRef.current.preload = 'auto';
-        dhikrAudioRef.current.setAttribute('playsinline', 'true');
-      }
-      const audio = dhikrAudioRef.current;
-      audio.src = clip.audioUrl;
-      audio.volume = 1.0;
       setPlayingDhikrClip(clip);
-
-      audio.onended = () => {
-        setPlayingDhikrClip(null);
-        refreshKeepAliveMediaSession();
-      };
-
-      audio.onerror = () => {
-        setPlayingDhikrClip(null);
-        setAudioNotice('تعذر تشغيل مقطع الذكر الصوتي. تأكد من الاتصال بالإنترنت.');
-        refreshKeepAliveMediaSession();
-      };
-
-      audio.play().catch(() => {
-        setPlayingDhikrClip(null);
-        setAudioNotice('يرجى الضغط على "تشغيل الذكر الآن" لمنح المتصفح إذن الصوت.');
-      });
 
       if ('mediaSession' in navigator) {
         try {
@@ -456,8 +540,67 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           // ignore
         }
       }
+
+      const playViaKeepAliveChannel = () => {
+        const silent = silentKeepAliveAudioRef.current;
+        if (!silent) return false;
+        isKeepAliveHijackedRef.current = true;
+        activeHijackOwnerRef.current = 'dhikr';
+        silent.pause();
+        silent.loop = false;
+        silent.volume = 1.0;
+        silent.src = clip.audioUrl;
+        silent.onended = () => {
+          setPlayingDhikrClip(null);
+          restoreSilentKeepAlive();
+          refreshKeepAliveMediaSession();
+        };
+        silent.onerror = () => {
+          setPlayingDhikrClip(null);
+          restoreSilentKeepAlive();
+          refreshKeepAliveMediaSession();
+        };
+        silent.play().catch(() => {
+          setPlayingDhikrClip(null);
+          restoreSilentKeepAlive();
+          setAudioNotice('يرجى الضغط على "تشغيل الذكر الآن" لمنح المتصفح إذن الصوت.');
+        });
+        return true;
+      };
+
+      // When backgrounded/locked on mobile OS, hijack the already-active MediaSession keep-alive element
+      if (typeof document !== 'undefined' && document.hidden && silentKeepAliveAudioRef.current) {
+        if (playViaKeepAliveChannel()) return;
+      }
+
+      if (!dhikrAudioRef.current) {
+        dhikrAudioRef.current = new Audio();
+        dhikrAudioRef.current.preload = 'auto';
+        dhikrAudioRef.current.setAttribute('playsinline', 'true');
+      }
+      const audio = dhikrAudioRef.current;
+      audio.src = clip.audioUrl;
+      audio.volume = 1.0;
+
+      audio.onended = () => {
+        setPlayingDhikrClip(null);
+        refreshKeepAliveMediaSession();
+      };
+
+      audio.onerror = () => {
+        setPlayingDhikrClip(null);
+        setAudioNotice('تعذر تشغيل مقطع الذكر الصوتي. تأكد من الاتصال بالإنترنت.');
+        refreshKeepAliveMediaSession();
+      };
+
+      audio.play().catch(() => {
+        if (!playViaKeepAliveChannel()) {
+          setPlayingDhikrClip(null);
+          setAudioNotice('يرجى الضغط على "تشغيل الذكر الآن" لمنح المتصفح إذن الصوت.');
+        }
+      });
     },
-    [ensureSilentKeepAliveLoop, refreshKeepAliveMediaSession, stopDhikrAudio]
+    [ensureSilentKeepAliveLoop, refreshKeepAliveMediaSession, restoreSilentKeepAlive, stopDhikrAudio]
   );
 
   // Unified handler for Adhan due event (from Web Worker, Service Worker, or Silent Audio clock)
@@ -470,13 +613,17 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       } catch {}
 
       const st = liveStateRef.current;
-      if (st.adhanEnabled) {
+      if (st.adhanEnabled && !st.adhanMuted) {
         playAdhanAudio(st.selectedMuadhin, prayerKey);
+      } else if (st.adhanEnabled && st.adhanMuted) {
+        setActiveAdhanPrayer(prayerKey);
       }
       if (st.adhanNotifEnabled) {
         sendPrayerNotification(
           `حان الآن موعد أذان ${PRAYER_LABELS_AR[prayerKey]}`,
-          `يرفع الأذان بصوت ${st.selectedMuadhin.name}`,
+          st.adhanMuted
+            ? `الأذان في وضع الصامت — ${st.selectedMuadhin.name}`
+            : `يرفع الأذان بصوت ${st.selectedMuadhin.name}`,
           `adhan-${prayerKey}`,
           signature
         );
@@ -552,7 +699,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           const isEgyptian = EGYPTIAN_DHIKR_CLIPS.some((c) => c.id === clip.id);
           if (isEgyptian && !st.selectedDhikrIds.includes(clip.id)) continue;
           const sched = st.dhikrSchedules[clip.id];
-          if (!sched || sched.timing === 'periodic') continue;
+          if (!sched || sched.timing === 'periodic' || sched.timing === 'off') continue;
 
           let matchedSig: string | null = null;
           if (sched.timing === 'custom_time' && sched.customTime === hhmm) {
@@ -633,13 +780,21 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       // Fallback if Worker is blocked
     }
 
-    // 2. Listen for Service Worker messages (SW_ADHAN_DUE / SW_PRE_ADHAN_DUE)
+    // 2. Listen for Service Worker messages (SW_ADHAN_DUE / SW_PRE_ADHAN_DUE / SW_STOP_ADHAN / SW_MUTE_ADHAN)
     const handleSwMessage = (event: MessageEvent) => {
       const data = event.data || {};
       if (data.type === 'SW_ADHAN_DUE' && data.prayerKey) {
         triggerAdhanForPrayer(data.prayerKey as PrayerKey, data.signature);
       } else if (data.type === 'SW_PRE_ADHAN_DUE' && data.prayerKey) {
         triggerPreAdhanForPrayer(data.prayerKey as PrayerKey, data.signature);
+      } else if (data.type === 'SW_STOP_ADHAN') {
+        stopAdhanAudio();
+      } else if (data.type === 'SW_MUTE_ADHAN') {
+        stopAdhanAudio();
+        setAdhanMuted(true);
+        try {
+          localStorage.setItem('noor_adhan_muted', 'true');
+        } catch {}
       }
     };
     if ('serviceWorker' in navigator) {
@@ -656,9 +811,9 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
       silentAudio.addEventListener('timeupdate', onSilentTimeUpdate);
     }
 
-    // 4. Unlock Silent Keep-Alive Audio on first user interaction anywhere in the app
+    // 4. Unlock Silent Keep-Alive & secondary audio channels on first user interaction anywhere
     const unlockOnGesture = () => {
-      ensureSilentKeepAliveLoop();
+      unlockAllAudioChannels();
       if (silentKeepAliveAudioRef.current) {
         silentKeepAliveAudioRef.current.removeEventListener('timeupdate', onSilentTimeUpdate);
         silentKeepAliveAudioRef.current.addEventListener('timeupdate', onSilentTimeUpdate);
@@ -728,6 +883,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
     stopDhikrAudio,
     triggerAdhanForPrayer,
     triggerPreAdhanForPrayer,
+    unlockAllAudioChannels,
   ]);
 
   // Sync state changes to Web Worker, Service Worker, and Silent Audio Keep-Alive Loop
@@ -843,39 +999,96 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              const next = !adhanEnabled;
-              setAdhanEnabled(next);
-              try {
-                localStorage.setItem('noor_adhan_enabled', String(next));
-              } catch {}
-            }}
-            className={`min-h-[40px] flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors ${
-              adhanEnabled
-                ? 'bg-emerald-700 text-white'
-                : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-            }`}
-          >
-            {adhanEnabled ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
-            <span>{adhanEnabled ? 'مُفعّل' : 'متوقف'}</span>
-          </button>
-        </div>
-
-        {/* Active Adhan Alert Banner if firing now */}
-        {activeAdhanPrayer && (
-          <div className="flex items-center justify-between gap-2 rounded-2xl border border-amber-500 bg-amber-500/20 px-3 py-2.5">
-            <span className="text-xs sm:text-sm font-extrabold">
-              يُرفع الآن أذان {PRAYER_LABELS_AR[activeAdhanPrayer]} — {selectedMuadhin.name}
-            </span>
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
-              onClick={stopAdhanAudio}
-              className="min-h-[36px] rounded-xl bg-rose-600 px-3 py-1 text-xs font-bold text-white"
+              onClick={() => {
+                unlockAllAudioChannels();
+                const next = !adhanMuted;
+                setAdhanMuted(next);
+                if (next) {
+                  stopAdhanAudio();
+                }
+                try {
+                  localStorage.setItem('noor_adhan_muted', String(next));
+                } catch {}
+              }}
+              className={`min-h-[40px] flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-bold transition-colors ${
+                adhanMuted
+                  ? 'bg-amber-600 text-white'
+                  : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+              }`}
             >
-              إيقاف
+              {adhanMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+              <span>{adhanMuted ? 'صامت' : 'صوت'}</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                unlockAllAudioChannels();
+                const next = !adhanEnabled;
+                setAdhanEnabled(next);
+                if (!next) stopAdhanAudio();
+                try {
+                  localStorage.setItem('noor_adhan_enabled', String(next));
+                } catch {}
+              }}
+              className={`min-h-[40px] flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-colors ${
+                adhanEnabled
+                  ? 'bg-emerald-700 text-white'
+                  : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              {adhanEnabled ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+              <span>{adhanEnabled ? 'مُفعّل' : 'متوقف'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Active Adhan Alert Banner if firing now (Stop / Silent / Cancel) */}
+        {activeAdhanPrayer && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-500 bg-amber-500/20 px-3 py-2.5">
+            <span className="text-xs sm:text-sm font-extrabold">
+              {adhanMuted
+                ? `موعد أذان ${PRAYER_LABELS_AR[activeAdhanPrayer]} (صامت)`
+                : `يُرفع الآن أذان ${PRAYER_LABELS_AR[activeAdhanPrayer]} — ${selectedMuadhin.name}`}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={stopAdhanAudio}
+                className="min-h-[36px] rounded-xl bg-rose-600 hover:bg-rose-500 px-2.5 py-1 text-xs font-bold text-white"
+              >
+                إيقاف
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  stopAdhanAudio();
+                  setAdhanMuted(true);
+                  try {
+                    localStorage.setItem('noor_adhan_muted', 'true');
+                  } catch {}
+                }}
+                className="min-h-[36px] rounded-xl bg-amber-600 hover:bg-amber-500 px-2.5 py-1 text-xs font-bold text-white"
+              >
+                صامت
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  stopAdhanAudio();
+                  setAdhanEnabled(false);
+                  try {
+                    localStorage.setItem('noor_adhan_enabled', 'false');
+                  } catch {}
+                }}
+                className="min-h-[36px] rounded-xl bg-slate-700 hover:bg-slate-600 px-2.5 py-1 text-xs font-bold text-white"
+              >
+                إلغاء
+              </button>
+            </div>
           </div>
         )}
 
@@ -1042,6 +1255,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           <button
             type="button"
             onClick={() => {
+              unlockAllAudioChannels();
               const next = !dhikrEnabled;
               const intervalSecs = dhikrIntervalMins * 60;
               nextDhikrAtMsRef.current = Date.now() + intervalSecs * 1000;
@@ -1050,6 +1264,7 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
               try {
                 localStorage.setItem('noor_dhikr_enabled', String(next));
               } catch {}
+              window.dispatchEvent(new Event('noor-settings-updated'));
               if (workerRef.current) {
                 workerRef.current.postMessage({
                   type: 'SYNC_STATE',
@@ -1068,11 +1283,11 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
             }`}
           >
             <Clock className="h-4 w-4" />
-            <span>{dhikrEnabled ? `بعد ${formatMMSS(dhikrSecondsLeft)}` : 'تفعيل المنبه'}</span>
+            <span>{dhikrEnabled ? `بعد ${formatMMSS(dhikrSecondsLeft)}` : 'بدون توقيت'}</span>
           </button>
         </div>
 
-        {/* Voice Mode Switcher: Egyptian Dhikr vs Egyptian Sheikhs */}
+        {/* Voice Mode Switcher: الأذكار vs Egyptian Sheikhs */}
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
@@ -1111,45 +1326,105 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
           </button>
         </div>
 
-        {/* Interval Buttons: 1-4 mins in Row 1 (4 buttons), 5 mins + Play Now in Row 2 */}
+        {/* Interval Buttons: 1-4 mins in Row 1 (click selects & activates, re-click cancels), 5 mins + Cancel + Play in Row 2 */}
         <div className="space-y-1.5">
           <div className="grid grid-cols-4 gap-1.5">
-            {[1, 2, 3, 4].map((mins) => (
-              <button
-                key={mins}
-                type="button"
-                onClick={() => {
-                  nextDhikrAtMsRef.current = Date.now() + mins * 60 * 1000;
-                  setDhikrIntervalMins(mins);
-                  setDhikrSecondsLeft(mins * 60);
-                  try {
-                    localStorage.setItem('noor_dhikr_interval', String(mins));
-                  } catch {}
-                }}
-                className={`min-h-[42px] rounded-xl px-1 py-2 text-[10px] sm:text-xs font-bold leading-tight text-center break-words transition-colors ${
-                  dhikrIntervalMins === mins
-                    ? 'bg-amber-600 text-white shadow-sm'
-                    : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
-                }`}
-              >
-                كل {mins} {mins === 1 ? 'دقيقة' : 'دقائق'}
-              </button>
-            ))}
+            {[1, 2, 3, 4].map((mins) => {
+              const isActive = dhikrEnabled && dhikrIntervalMins === mins;
+              return (
+                <button
+                  key={mins}
+                  type="button"
+                  onClick={() => {
+                    unlockAllAudioChannels();
+                    if (isActive) {
+                      setDhikrEnabled(false);
+                      try {
+                        localStorage.setItem('noor_dhikr_enabled', 'false');
+                      } catch {}
+                      window.dispatchEvent(new Event('noor-settings-updated'));
+                      if (workerRef.current) {
+                        workerRef.current.postMessage({
+                          type: 'SYNC_STATE',
+                          payload: { dhikrEnabled: false },
+                        });
+                      }
+                      return;
+                    }
+                    nextDhikrAtMsRef.current = Date.now() + mins * 60 * 1000;
+                    setDhikrIntervalMins(mins);
+                    setDhikrSecondsLeft(mins * 60);
+                    setDhikrEnabled(true);
+                    try {
+                      localStorage.setItem('noor_dhikr_interval', String(mins));
+                      localStorage.setItem('noor_dhikr_enabled', 'true');
+                    } catch {}
+                    window.dispatchEvent(new Event('noor-settings-updated'));
+                    if (workerRef.current) {
+                      workerRef.current.postMessage({
+                        type: 'SYNC_STATE',
+                        payload: {
+                          dhikrEnabled: true,
+                          dhikrIntervalMins: mins,
+                          resetDhikrTimer: true,
+                        },
+                      });
+                    }
+                  }}
+                  className={`min-h-[42px] rounded-xl px-1 py-2 text-[10px] sm:text-xs font-bold leading-tight text-center break-words transition-colors ${
+                    isActive
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+                  }`}
+                >
+                  كل {mins} {mins === 1 ? 'دقيقة' : 'دقائق'}
+                </button>
+              );
+            })}
           </div>
 
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             <button
               type="button"
               onClick={() => {
+                unlockAllAudioChannels();
+                const isActive = dhikrEnabled && dhikrIntervalMins === 5;
+                if (isActive) {
+                  setDhikrEnabled(false);
+                  try {
+                    localStorage.setItem('noor_dhikr_enabled', 'false');
+                  } catch {}
+                  window.dispatchEvent(new Event('noor-settings-updated'));
+                  if (workerRef.current) {
+                    workerRef.current.postMessage({
+                      type: 'SYNC_STATE',
+                      payload: { dhikrEnabled: false },
+                    });
+                  }
+                  return;
+                }
                 nextDhikrAtMsRef.current = Date.now() + 5 * 60 * 1000;
                 setDhikrIntervalMins(5);
                 setDhikrSecondsLeft(5 * 60);
+                setDhikrEnabled(true);
                 try {
                   localStorage.setItem('noor_dhikr_interval', '5');
+                  localStorage.setItem('noor_dhikr_enabled', 'true');
                 } catch {}
+                window.dispatchEvent(new Event('noor-settings-updated'));
+                if (workerRef.current) {
+                  workerRef.current.postMessage({
+                    type: 'SYNC_STATE',
+                    payload: {
+                      dhikrEnabled: true,
+                      dhikrIntervalMins: 5,
+                      resetDhikrTimer: true,
+                    },
+                  });
+                }
               }}
-              className={`min-h-[42px] rounded-xl px-2 py-2 text-xs font-bold text-center transition-colors ${
-                dhikrIntervalMins === 5
+              className={`min-h-[42px] rounded-xl px-1.5 py-2 text-[10px] sm:text-xs font-bold leading-tight text-center break-words transition-colors ${
+                dhikrEnabled && dhikrIntervalMins === 5
                   ? 'bg-amber-600 text-white shadow-sm'
                   : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
               }`}
@@ -1159,8 +1434,36 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
 
             <button
               type="button"
-              onClick={() => (playingDhikrClip ? stopDhikrAudio() : playNextDhikrClip())}
-              className={`min-h-[42px] flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-bold transition-colors ${
+              onClick={() => {
+                setDhikrEnabled(false);
+                try {
+                  localStorage.setItem('noor_dhikr_enabled', 'false');
+                } catch {}
+                window.dispatchEvent(new Event('noor-settings-updated'));
+                if (workerRef.current) {
+                  workerRef.current.postMessage({
+                    type: 'SYNC_STATE',
+                    payload: { dhikrEnabled: false },
+                  });
+                }
+              }}
+              className={`min-h-[42px] rounded-xl px-1.5 py-2 text-[10px] sm:text-xs font-bold leading-tight text-center break-words transition-colors ${
+                !dhikrEnabled
+                  ? 'bg-slate-700 text-white'
+                  : 'border border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300 hover:bg-rose-500/20'
+              }`}
+            >
+              إلغاء التوقيت
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                unlockAllAudioChannels();
+                if (playingDhikrClip) stopDhikrAudio();
+                else playNextDhikrClip();
+              }}
+              className={`min-h-[42px] flex items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[10px] sm:text-xs font-bold leading-tight text-center transition-colors ${
                 playingDhikrClip
                   ? 'bg-rose-600 text-white'
                   : 'bg-emerald-700 hover:bg-emerald-600 text-white'
@@ -1168,36 +1471,37 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
             >
               {playingDhikrClip ? (
                 <>
-                  <Square className="h-3.5 w-3.5 fill-current" />
+                  <Square className="h-3.5 w-3.5 fill-current shrink-0" />
                   <span>إيقاف الذكر</span>
                 </>
               ) : (
                 <>
-                  <Play className="h-3.5 w-3.5 fill-current" />
-                  <span>تشغيل الذكر الآن</span>
+                  <Play className="h-3.5 w-3.5 fill-current shrink-0" />
+                  <span>تشغيل الآن</span>
                 </>
               )}
             </button>
           </div>
         </div>
 
-        {/* Active / Clickable Clips Preview List: single row per clip (Title + optional Custom Time + Play) */}
+        {/* Active / Clickable Clips Preview List: single row per clip (Title + Custom Time/Off + Play) */}
         <div className="space-y-1.5 pt-1">
           {activePool.map((clip) => {
             const isPlaying = playingDhikrClip?.id === clip.id;
-            const isSelected =
-              dhikrMode !== 'egyptian_dhikr' || selectedDhikrIds.includes(clip.id);
             const sched = dhikrSchedules[clip.id] || {
               timing: 'periodic' as DhikrScheduleTiming,
               customTime: '08:00',
             };
+            const isChecked =
+              (dhikrMode !== 'egyptian_dhikr' || selectedDhikrIds.includes(clip.id)) &&
+              sched.timing !== 'off';
             return (
               <div
                 key={clip.id}
                 className={`flex w-full items-center justify-between gap-2 rounded-xl border px-3 py-2 transition-colors ${
                   isPlaying
                     ? 'border-emerald-500 bg-emerald-500/15'
-                    : isSelected
+                    : isChecked
                       ? 'border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/60 hover:border-amber-500/40'
                       : 'border-slate-200/60 dark:border-slate-800/60 bg-slate-100/60 dark:bg-slate-900/40 opacity-65'
                 }`}
@@ -1205,14 +1509,15 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
                 {dhikrMode === 'egyptian_dhikr' && (
                   <input
                     type="checkbox"
-                    checked={isSelected}
+                    checked={selectedDhikrIds.includes(clip.id)}
                     aria-label={`تفعيل أو إيقاف ${clip.label}`}
                     onChange={() => {
-                      if (isSelected && selectedDhikrIds.length <= 1) {
+                      const currentlyIncluded = selectedDhikrIds.includes(clip.id);
+                      if (currentlyIncluded && selectedDhikrIds.length <= 1) {
                         setAudioNotice('يجب تحديد ذكر واحد على الأقل للتنبيه الدوري.');
                         return;
                       }
-                      const next = isSelected
+                      const next = currentlyIncluded
                         ? selectedDhikrIds.filter((id) => id !== clip.id)
                         : [...selectedDhikrIds, clip.id];
                       setSelectedDhikrIds(next);
@@ -1228,20 +1533,31 @@ export function AdhanAndDhikrPanel({ timings, timezone }: AdhanAndDhikrPanelProp
 
                 <button
                   type="button"
-                  onClick={() => setTimeModalClip(clip)}
+                  onClick={() => {
+                    unlockAllAudioChannels();
+                    setTimeModalClip(clip);
+                  }}
                   className="flex flex-1 min-w-0 items-center justify-between gap-2 text-right"
                 >
                   <span className="text-xs font-bold truncate">{clip.label}</span>
-                  {sched.timing === 'custom_time' && (
+                  {sched.timing === 'custom_time' ? (
                     <span className="shrink-0 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-extrabold text-amber-700 dark:text-amber-300 whitespace-nowrap">
                       {formatTime24To12Ar(sched.customTime)}
                     </span>
-                  )}
+                  ) : sched.timing === 'off' ? (
+                    <span className="shrink-0 rounded-lg border border-rose-500/35 bg-rose-500/10 px-2 py-0.5 text-[10px] font-extrabold text-rose-600 dark:text-rose-300 whitespace-nowrap">
+                      متوقف
+                    </span>
+                  ) : null}
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => (isPlaying ? stopDhikrAudio() : playNextDhikrClip(clip))}
+                  onClick={() => {
+                    unlockAllAudioChannels();
+                    if (isPlaying) stopDhikrAudio();
+                    else playNextDhikrClip(clip);
+                  }}
                   aria-label={isPlaying ? `إيقاف ${clip.label}` : `تشغيل ${clip.label}`}
                   className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white transition-colors ${
                     isPlaying ? 'bg-rose-600' : 'bg-emerald-700 hover:bg-emerald-600'

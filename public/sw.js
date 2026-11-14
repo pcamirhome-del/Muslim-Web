@@ -120,6 +120,10 @@ function checkServiceWorkerPrayerSchedule() {
               renotify: true,
               requireInteraction: true,
               vibrate: [300, 120, 300, 120, 400],
+              actions: [
+                { action: 'stop_adhan', title: 'إيقاف الأذان' },
+                { action: 'mute_adhan', title: 'صامت' },
+              ],
             })
             .catch(() => {});
         }
@@ -201,6 +205,7 @@ self.addEventListener('message', (event) => {
       }
     }
     if (self.registration && self.registration.showNotification) {
+      const isAdhanTag = String(tag || '').startsWith('adhan-');
       event.waitUntil(
         self.registration
           .showNotification(title, {
@@ -211,6 +216,14 @@ self.addEventListener('message', (event) => {
             renotify: true,
             requireInteraction: true,
             vibrate: [300, 120, 300, 120, 400],
+            ...(isAdhanTag
+              ? {
+                  actions: [
+                    { action: 'stop_adhan', title: 'إيقاف الأذان' },
+                    { action: 'mute_adhan', title: 'صامت' },
+                  ],
+                }
+              : {}),
           })
           .catch(() => {})
       );
@@ -352,6 +365,14 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  if (event.action === 'stop_adhan') {
+    event.waitUntil(notifyClients({ type: 'SW_STOP_ADHAN' }));
+    return;
+  }
+  if (event.action === 'mute_adhan') {
+    event.waitUntil(notifyClients({ type: 'SW_MUTE_ADHAN' }));
+    return;
+  }
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
       if (clients.length > 0) {

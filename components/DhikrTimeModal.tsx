@@ -96,6 +96,7 @@ function DhikrTimeModalInner({
               <option value="before_prayer">قبل الصلاة</option>
               <option value="after_prayer">بعد الصلاة</option>
               <option value="custom_time">اختيار وقت</option>
+              <option value="off">إيقاف</option>
             </select>
           </div>
 

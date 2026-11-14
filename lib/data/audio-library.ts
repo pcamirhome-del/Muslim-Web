@@ -98,7 +98,7 @@ export const MUADHINS_LIST: MuadhinItem[] = [
   },
 ];
 
-export type DhikrScheduleTiming = 'periodic' | 'before_prayer' | 'after_prayer' | 'custom_time';
+export type DhikrScheduleTiming = 'periodic' | 'before_prayer' | 'after_prayer' | 'custom_time' | 'off';
 
 export interface DhikrClipSchedule {
   timing: DhikrScheduleTiming;
@@ -286,7 +286,8 @@ export function parseDhikrSchedules(raw: string | null): DhikrScheduleMap {
             entry.timing === 'periodic' ||
             entry.timing === 'before_prayer' ||
             entry.timing === 'after_prayer' ||
-            entry.timing === 'custom_time'
+            entry.timing === 'custom_time' ||
+            entry.timing === 'off'
               ? entry.timing
               : result[clip.id]?.timing || 'periodic';
           const validTime =

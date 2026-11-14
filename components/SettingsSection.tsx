@@ -421,6 +421,13 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
             onClick={() => {
               const next = !adhanAudioEnabled;
               setAdhanAudioEnabled(next);
+              if (next) {
+                try {
+                  localStorage.setItem('noor_adhan_muted', 'false');
+                } catch {
+                  // ignore
+                }
+              }
               persistSetting(
                 'noor_adhan_enabled',
                 String(next),
@@ -471,7 +478,9 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
             <div className="min-w-0">
               <p className="text-xs sm:text-sm font-extrabold">الأذكار الصوتية الدورية</p>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                تشغيل تلقائي كل {dhikrInterval} {dhikrInterval === 1 ? 'دقيقة' : 'دقائق'}
+                {dhikrEnabled
+                  ? `تشغيل تلقائي كل ${dhikrInterval} ${dhikrInterval === 1 ? 'دقيقة' : 'دقائق'}`
+                  : 'بدون توقيت (المنبه متوقف)'}
               </p>
             </div>
             <span
@@ -550,40 +559,83 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
           </div>
 
           <div className="grid grid-cols-4 gap-1.5">
-            {[1, 2, 3, 4].map((mins) => (
-              <button
-                key={mins}
-                type="button"
-                onClick={() => {
-                  setDhikrInterval(mins);
-                  persistSetting('noor_dhikr_interval', String(mins), `تم ضبط التكرار كل ${mins} د`);
-                }}
-                className={`min-h-[42px] rounded-xl px-1 py-2 text-[10px] sm:text-xs font-bold leading-tight text-center break-words transition-colors ${
-                  dhikrInterval === mins
-                    ? 'bg-amber-600 text-white shadow-sm'
-                    : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
-                }`}
-              >
-                كل {mins} {mins === 1 ? 'دقيقة' : 'دقائق'}
-              </button>
-            ))}
+            {[1, 2, 3, 4].map((mins) => {
+              const isActive = dhikrEnabled && dhikrInterval === mins;
+              return (
+                <button
+                  key={mins}
+                  type="button"
+                  onClick={() => {
+                    if (isActive) {
+                      setDhikrEnabled(false);
+                      persistSetting('noor_dhikr_enabled', 'false', 'تم إلغاء توقيت المنبه الدوري');
+                    } else {
+                      setDhikrInterval(mins);
+                      setDhikrEnabled(true);
+                      try {
+                        localStorage.setItem('noor_dhikr_interval', String(mins));
+                      } catch {
+                        // ignore
+                      }
+                      persistSetting('noor_dhikr_enabled', 'true', `تم ضبط التكرار كل ${mins} د`);
+                    }
+                  }}
+                  className={`min-h-[42px] rounded-xl px-1 py-2 text-[10px] sm:text-xs font-bold leading-tight text-center break-words transition-colors ${
+                    isActive
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+                  }`}
+                >
+                  كل {mins} {mins === 1 ? 'دقيقة' : 'دقائق'}
+                </button>
+              );
+            })}
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setDhikrInterval(5);
-              persistSetting('noor_dhikr_interval', '5', 'تم ضبط التكرار كل 5 دقائق');
-            }}
-            className={`w-full min-h-[42px] rounded-xl px-3 py-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
-              dhikrInterval === 5
-                ? 'bg-amber-600 text-white shadow-sm'
-                : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
-            }`}
-          >
-            <Clock className="h-3.5 w-3.5" />
-            <span>تكرار الأذكار كل 5 دقائق</span>
-          </button>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                if (dhikrEnabled && dhikrInterval === 5) {
+                  setDhikrEnabled(false);
+                  persistSetting('noor_dhikr_enabled', 'false', 'تم إلغاء توقيت المنبه الدوري');
+                } else {
+                  setDhikrInterval(5);
+                  setDhikrEnabled(true);
+                  try {
+                    localStorage.setItem('noor_dhikr_interval', '5');
+                  } catch {
+                    // ignore
+                  }
+                  persistSetting('noor_dhikr_enabled', 'true', 'تم ضبط التكرار كل 5 دقائق');
+                }
+              }}
+              className={`min-h-[42px] rounded-xl px-2 py-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                dhikrEnabled && dhikrInterval === 5
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800'
+              }`}
+            >
+              <Clock className="h-3.5 w-3.5 shrink-0" />
+              <span>كل 5 دقائق</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setDhikrEnabled(false);
+                persistSetting('noor_dhikr_enabled', 'false', 'تم إلغاء توقيت المنبه الدوري');
+              }}
+              className={`min-h-[42px] rounded-xl px-2 py-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                !dhikrEnabled
+                  ? 'bg-rose-600/90 text-white shadow-sm'
+                  : 'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400'
+              }`}
+            >
+              <X className="h-3.5 w-3.5 shrink-0" />
+              <span>إلغاء التوقيت</span>
+            </button>
+          </div>
 
           {/* Select Specific Dhikrs (Checkboxes) + Per-Clip Schedule */}
           <div className="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-3">
@@ -652,11 +704,15 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
                       className="flex flex-1 min-w-0 items-center justify-between gap-2 text-right"
                     >
                       <span className="truncate">{clip.label}</span>
-                      {sched.timing === 'custom_time' && (
+                      {sched.timing === 'custom_time' ? (
                         <span className="shrink-0 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-extrabold text-amber-700 dark:text-amber-300 whitespace-nowrap">
                           {formatTime24To12Ar(sched.customTime)}
                         </span>
-                      )}
+                      ) : sched.timing === 'off' ? (
+                        <span className="shrink-0 rounded-md border border-rose-500/35 bg-rose-500/10 px-2 py-0.5 text-[10px] font-extrabold text-rose-600 dark:text-rose-300 whitespace-nowrap">
+                          متوقف
+                        </span>
+                      ) : null}
                     </button>
 
                     <span
@@ -1014,6 +1070,8 @@ export function SettingsSection({ isDark, onToggleTheme }: SettingsSectionProps)
             time24,
             timing === 'custom_time'
               ? `تم ضبط وقت التشغيل الساعة ${formatTime24To12Ar(time24)}`
+              : timing === 'off'
+              ? 'تم إيقاف تشغيل الذكر تلقائياً'
               : 'تم حفظ توقيت تشغيل الذكر'
           );
           setTimeModalClip(null);
