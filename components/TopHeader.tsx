@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Menu, Sun, Moon, Home } from 'lucide-react';
+import { Menu, Sun, Moon, Home, PictureInPicture2 } from 'lucide-react';
 import { HijriDateInfo, getZonedClockParts } from '@/lib/prayer-utils';
 import type { AppSection } from './SideDrawer';
 
@@ -14,6 +14,9 @@ interface TopHeaderProps {
   onSelectGuide: (mode: 'wudu' | 'prayer') => void;
   activeTab: AppSection;
   onGoHome: () => void;
+  onOpenDesktopWidget?: () => void;
+  isDesktopWidgetOpen?: boolean;
+  desktopWidgetNotice?: string | null;
 }
 
 export function TopHeader({
@@ -25,6 +28,9 @@ export function TopHeader({
   onSelectGuide,
   activeTab,
   onGoHome,
+  onOpenDesktopWidget,
+  isDesktopWidgetOpen,
+  desktopWidgetNotice,
 }: TopHeaderProps) {
   const [now, setNow] = useState<Date | null>(null);
   const [guideValue, setGuideValue] = useState('');
@@ -99,6 +105,22 @@ export function TopHeader({
               <span className="hidden sm:inline">الرئيسية</span>
             </button>
           )}
+          {onOpenDesktopWidget && (
+            <button
+              type="button"
+              onClick={onOpenDesktopWidget}
+              title="نافذة سطح المكتب"
+              aria-label="نافذة سطح المكتب - ويدجت الصلاة"
+              className={`hidden sm:flex h-11 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-bold transition-colors ${
+                isDesktopWidgetOpen
+                  ? 'border-amber-500 bg-amber-600 text-white shadow-sm'
+                  : 'border-amber-500/40 bg-amber-500/10 dark:bg-amber-500/15 text-amber-900 dark:text-amber-200 hover:bg-amber-500/20'
+              }`}
+            >
+              <PictureInPicture2 className="h-4 w-4 shrink-0" />
+              <span>ويدجت الصلاة</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onToggleTheme}
@@ -113,6 +135,12 @@ export function TopHeader({
           </button>
         </div>
       </div>
+
+      {desktopWidgetNotice && (
+        <p className="mt-1.5 rounded-lg border border-amber-500/35 bg-amber-500/10 px-2.5 py-1 text-[11px] font-bold text-amber-700 dark:text-amber-300">
+          {desktopWidgetNotice}
+        </p>
+      )}
 
       {/* Row 2: Live 12h Clock + Day + Hijri & Gregorian Dates */}
       <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-slate-200/60 dark:border-slate-800/70 pt-1.5 text-xs">

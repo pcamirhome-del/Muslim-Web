@@ -22,6 +22,7 @@ import {
   ChevronRight,
   ChevronUp,
   Smartphone,
+  Library,
 } from 'lucide-react';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 
@@ -33,6 +34,7 @@ export type AppSection =
   | 'tafsir'
   | 'hisn'
   | 'hadith'
+  | 'prophets'
   | 'settings';
 
 interface SideDrawerProps {
@@ -300,6 +302,7 @@ export function SideDrawer({
               { id: 'hadith' as AppSection, label: 'الأحاديث النبوية', icon: ScrollText },
               { id: 'hisn' as AppSection, label: 'حصن المسلم وفقه الصلوات', icon: ShieldCheck },
               { id: 'qibla' as AppSection, label: 'القبلة', icon: Compass },
+              { id: 'prophets' as AppSection, label: 'قصص الأنبياء', icon: Library },
             ].map((item) => {
               const Icon = item.icon;
               const active = activeTab === item.id;

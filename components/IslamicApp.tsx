@@ -29,6 +29,8 @@ import { BottomNavBar } from './BottomNavBar';
 import { AppSection, SideDrawer } from './SideDrawer';
 import { WuduPrayerModal } from './WuduPrayerModal';
 import { Footer } from './Footer';
+import { DesktopPipWidgetPortal, useDesktopPipWidget } from './DesktopPipWidget';
+import { ProphetsStories } from './ProphetsStories';
 import { useResilientRadio } from '@/hooks/useResilientRadio';
 
 export function IslamicApp() {
@@ -39,6 +41,7 @@ export function IslamicApp() {
   const [ramadanPreview, setRamadanPreview] = useState<boolean>(false);
 
   const radio = useResilientRadio();
+  const desktopWidget = useDesktopPipWidget();
 
   const [location, setLocation] = useState<UserLocation>(DEFAULT_EGYPT_LOCATION);
   const [schedule, setSchedule] = useState<PrayerScheduleData | null>(null);
@@ -61,7 +64,7 @@ export function IslamicApp() {
       const tabParam = params.get('tab') as AppSection | null;
       if (
         tabParam &&
-        ['home', 'radio', 'qibla', 'quran', 'tafsir', 'hisn', 'hadith', 'settings'].includes(
+        ['home', 'radio', 'qibla', 'quran', 'tafsir', 'hisn', 'hadith', 'prophets', 'settings'].includes(
           tabParam
         )
       ) {
@@ -231,6 +234,9 @@ export function IslamicApp() {
         onSelectGuide={(mode) => setGuideMode(mode)}
         activeTab={activeTab}
         onGoHome={() => setActiveTab('home')}
+        onOpenDesktopWidget={desktopWidget.openDesktopWidget}
+        isDesktopWidgetOpen={desktopWidget.isPipOpen}
+        desktopWidgetNotice={desktopWidget.pipBlockedNotice}
       />
 
       <OfflineIndicator />
@@ -324,6 +330,10 @@ export function IslamicApp() {
 
         {activeTab === 'hadith' && <HadithAndDownloadsSection />}
 
+        {activeTab === 'prophets' && (
+          <ProphetsStories onCloseSection={() => setActiveTab('home')} />
+        )}
+
         {activeTab === 'settings' && (
           <SettingsSection isDark={isDark} onToggleTheme={toggleTheme} />
         )}
@@ -367,6 +377,15 @@ export function IslamicApp() {
         mode={guideMode}
         onClose={() => setGuideMode(null)}
         onSwitchMode={(mode) => setGuideMode(mode)}
+      />
+
+      <DesktopPipWidgetPortal
+        container={desktopWidget.pipContainer}
+        onClose={desktopWidget.closeDesktopWidget}
+        nextPrayer={nextPrayer}
+        location={location}
+        hijri={schedule?.hijri || null}
+        timezone={activeTimezone}
       />
     </BackgroundShell>
   );
